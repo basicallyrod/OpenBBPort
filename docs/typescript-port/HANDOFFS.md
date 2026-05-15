@@ -24,6 +24,7 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · 🔁 needs revision
 | 6 | Root layout + index + uninstall + tray | `raw-deep-dives/app-shell.md` | ✅ | Wave 1 agent (Opus) |
 | 7 | Tauri ↔ Frontend bridge (IPC catalog) | `raw-deep-dives/ipc-bridge.md` | ✅ | Wave 1 agent (Opus) |
 | 8 | Python openbb-api server | `raw-deep-dives/platform-rest-api.md` | ✅ | Wave 1 agent (Opus) |
+| 9 | OpenBB CLI REPL (Python menu shell) | `raw-deep-dives/cli-repl.md` | ✅ | Wave 1 agent (Opus) |
 
 ### Wave 1B — Second-pass review (find-what-was-missed)
 
@@ -56,8 +57,8 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 | `20-features/feature-logs-streaming.md` | `raw-deep-dives/logs-streaming.md` + `logs-streaming.v2.md` | ✅ |
 | `20-features/feature-tray-and-autostart.md` | `raw-deep-dives/app-shell.md` + `app-shell.v2.md` | ✅ |
 | `20-features/feature-uninstall.md` | `raw-deep-dives/app-shell.md` + `app-shell.v2.md` | ✅ |
-| `20-features/feature-platform-rest-api.md` | `raw-deep-dives/platform-rest-api.md` | ⬜ |
-| `20-features/feature-cli-repl.md` | (new deep-dive needed) | ⬜ |
+| `20-features/feature-platform-rest-api.md` | `raw-deep-dives/platform-rest-api.md` + `platform-rest-api.v2.md` | ✅ |
+| `20-features/feature-cli-repl.md` | `raw-deep-dives/cli-repl.md` | 🟡 |
 
 ### Wave 3 — Architecture + port strategy (queued)
 

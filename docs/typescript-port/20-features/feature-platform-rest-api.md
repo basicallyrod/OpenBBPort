@@ -135,19 +135,18 @@ The default success body for any `OBBject`-returning command after
 ```
 
 Notes:
-- `results` is **always a list of dicts (or a single dict), never a DataFrame**
-  — the Fetcher already converted via Pandas `to_dict("records")` and
-  instantiated Pydantic models server-side. `OBBject.to_df/to_polars/to_dict/to_llm`
-  are **client-side only** (Python SDK), never run in the server.
-- `chart.fig` (the live Plotly figure) is stripped before serialisation
+- `results` is **always a list of dicts (or single dict), never a DataFrame**
+  — Fetcher already ran `to_dict("records")` + Pydantic validation.
+  `OBBject.to_df/to_polars/to_dict/to_llm` are **client-side only** (Python
+  SDK), never server-side.
+- `chart.fig` (live Plotly figure) is stripped before serialisation
   (`commands.py:152-209`); only `chart.content` (raw Plotly JSON) plus
-  `chart.format` are sent. Plotly.js can render `chart.content` directly.
-- `EmptyDataError` → bare **204** with no body, not 200 + empty list
-  (`exception_handlers.py:122-125`).
-- The OpenAPI response model is a **discriminated union** keyed on each
-  provider's `_provider` attribute. The discriminator field is **not** in the
-  serialised JSON (it lives on `obbject.provider` instead) — codegen
-  consumers may need to strip it from generated types.
+  `chart.format` are sent — Plotly.js can render directly.
+- `EmptyDataError` → bare **204** (no body, not `200 []`).
+- OpenAPI response is a **discriminated union** keyed on each provider's
+  `_provider` attribute. The discriminator is **not** in the serialised JSON
+  (it lives on `obbject.provider`) — codegen consumers should strip it from
+  generated types.
 
 ## IPC contract
 
@@ -222,20 +221,25 @@ schema but always absent on the wire (see Known bugs).
 
 ## Auth modes
 
-Three mutually-exclusive modes, controlled by env vars read on the
-process's `Env()` singleton (boot-time only — changing them requires a
-restart):
+Three mutually-exclusive modes via env vars read on the `Env()` singleton
+(boot-time only — restart required to change):
 
-| Mode | Trigger | Behaviour |
-|---|---|---|
-| **None (default)** | `OPENBB_API_AUTH=false` | `security = lambda: None`. The `__authenticated_user_settings` dependency is NOT injected; routes are open. `UserSettings()` is still re-read on every request (the `UserSettings()` default constructor parses the file). |
-| **HTTP Basic** | `OPENBB_API_AUTH=true` + `OPENBB_API_USERNAME` + `OPENBB_API_PASSWORD` | `authenticate_user` (`auth/user.py:15-43`) compares with `secrets.compare_digest`. Mismatch → 401 with `WWW-Authenticate: Basic`. `coverage/system/user` routers also gate behind this. |
-| **Extension** | `OPENBB_API_AUTH_EXTENSION=<name>` | `AuthService` looks up entry-point in `openbb_core_extension` group named `<name>` and reads `router`, `auth_hook`, `user_settings_hook` attributes (`service/auth_service.py:31-76`). This is how JWT/OAuth is delivered (no first-party example ships in this repo). The extension's `user_settings_hook` can return a **per-user** `UserSettings` — required for multi-tenant deployments. |
+- **None (default)** — `OPENBB_API_AUTH=false`. `security = lambda: None`,
+  no dep injected, routes open. `UserSettings()` is still re-read per
+  request via its default constructor.
+- **HTTP Basic** — `OPENBB_API_AUTH=true` + `OPENBB_API_USERNAME` +
+  `OPENBB_API_PASSWORD`. `authenticate_user` (`auth/user.py:15-43`) uses
+  `secrets.compare_digest`. Mismatch → 401 with `WWW-Authenticate: Basic`.
+- **Extension** — `OPENBB_API_AUTH_EXTENSION=<name>`. `AuthService` looks up
+  entry-point in `openbb_core_extension` and reads `router`, `auth_hook`,
+  `user_settings_hook` (`service/auth_service.py:31-76`). This is how
+  JWT/OAuth ships (no first-party example in this repo). `user_settings_hook`
+  can return a **per-user** `UserSettings` — required for multi-tenant.
 
-There is no global middleware enforcing auth; the check is a **FastAPI
-dependency** added per-route by `build_new_signature` (`commands.py:132-144`).
-Set `OPENBB_DEV_MODE=true` to mount the `/user`, `/system`, and `/coverage`
-routers (default install hides them).
+No global auth middleware; the check is a per-route FastAPI dependency
+added by `build_new_signature` (`commands.py:132-144`). Set
+`OPENBB_DEV_MODE=true` to mount `/user`, `/system`, `/coverage` routers
+(hidden by default).
 
 ## Env var contract
 
@@ -369,29 +373,34 @@ reflective work at process start. Boot then <500 ms.
 
 ## TS port mapping
 
-The decision tree lives in `30-port/port-strategy.md`. The per-feature
-synopsis:
+Full decision tree → `30-port/port-strategy.md`. Per-feature synopsis:
 
-| Concern | Strategy A (TS rewrite) | Strategy B (Python subprocess wrap) | Notes |
-|---|---|---|---|
-| HTTP shell + routing | Hono/Express + zod-validators | Spawn `openbb-api`, proxy `fetch` | A is trivial; B is what desktop already does |
-| `Router.command(model=...)` decorator + dependency injection | Build-time codegen of route registry | n/a (Python handles) | A requires regenerating types whenever a provider changes |
-| `ProviderInterface` / `RegistryMap` (~700 LOC of metaclass-driven Pydantic generation) | Generate Zod schemas at TS build time from `/openapi.json` | n/a | A: must run a one-time `openbb-api` to dump `/openapi.json`, then `openapi-zod-client` codegen |
-| Discriminated-union response model | Zod `discriminatedUnion` | n/a | A: drop the `_provider` discriminator field in the generated types |
-| Per-provider Fetcher (T-E-T pipeline) | Reimplement each in TS | n/a — Python runs as-is | **The killer for Strategy A.** Easy bucket (FMP/Polygon/Intrinio/Tiingo/Alpha Vantage/FRED/IMF/OECD) ports cleanly. Hard bucket (yfinance, multpl, tmx, seeking_alpha) needs TLS impersonation or non-trivial HTML scrapers |
-| `openbb-charting` (server-side chart construction) | Skip; emit raw results, render with Plotly.js (`react-plotly.js`) | Keep; `chart.content` is Plotly JSON either way | The rendering is portable; only chart **construction** is Python-only |
-| `openbb-econometrics`/`-quantitative`/`-technical` | Skip or proxy to Python sidecar | Free | Data-processing extensions are numpy/scipy/statsmodels |
-| `OBBject.to_df/to_polars/to_dict/to_llm` | Skip — return JSON, let consumers use `arquero`/raw arrays. `to_llm` reproducible as `JSON.stringify(results.map(...))` | n/a (client-side Python only) | These never run server-side; only matters for an in-renderer SDK |
-| MCP server | Reimplement against same FastAPI-equivalent OR drop | Keep; spawn `openbb-mcp` too | The desktop already runs both — keeping is no extra work |
-| `/widgets.json` and `/apps.json` | Reimplement from local route registry | Proxy from Python | If A is partial, can generate `widgets.json` from the TS-served subset |
-| Auth modes | Reimplement (None / Basic) trivially; extension contract is Python-only | Use as-is | Custom extension auth must stay Python (entry-point lookup) |
-| `user_settings.json` read | TS reads same file at request time | Python reads | Both are file-backed so the desktop's API Keys UI works unchanged |
+| Concern | Strategy A (TS rewrite) | Strategy B (Python wrap) |
+|---|---|---|
+| HTTP shell + routing | Hono/Express + zod validators | Spawn `openbb-api`, proxy `fetch` |
+| `Router.command(model=...)` + dep injection | Build-time codegen of route registry | n/a |
+| `ProviderInterface` / `RegistryMap` (~700 LOC Pydantic metaclass gen) | Generate Zod schemas at build time from `/openapi.json` | n/a |
+| Discriminated-union response model | Zod `discriminatedUnion`; drop `_provider` field in generated types | n/a |
+| Per-provider Fetcher (T-E-T pipeline) | **The killer.** Easy bucket (FMP/Polygon/Intrinio/Tiingo/AV/FRED/IMF/OECD) ports cleanly; hard bucket (yfinance/multpl/tmx/seeking_alpha) needs TLS impersonation or HTML scrape | Python runs as-is |
+| `openbb-charting` (server-side fig construction) | Skip; emit results, render with `react-plotly.js` | Keep; `chart.content` is Plotly JSON either way |
+| `openbb-econometrics`/`-quantitative`/`-technical` | Skip or proxy to Python sidecar | Free |
+| `OBBject.to_df/to_polars/to_dict/to_llm` | n/a — these are client-side (Python SDK) | n/a |
+| MCP server | Re-host on same HTTP shell or drop | Keep; spawn `openbb-mcp` too |
+| `/widgets.json` / `/apps.json` | Reimplement from local route registry | Proxy from Python |
+| Auth modes | Reimplement None/Basic; extension contract is Python-only | Use as-is |
+| `user_settings.json` | TS reads same file at request time | Python reads | 
 
-**Mixed (most realistic):** B for everything provider-shaped (Python
-sidecar handles `/api/v1/*`), A for things the TS UI actually owns
-(settings persistence, credential vault UI, the agent layer, codegen
-client types). A thin TS `OBBject` type generated from `/openapi.json` at
-build time gives the renderer type-safe access without re-porting fetchers.
+Trade-off: Strategy A pros — single language, single process, fast cold
+start (<500 ms), small install. Cons — enormous ongoing fetcher surface;
+no parity with `openbb-charting`/`-econometrics`/`-quantitative`/`-technical`.
+Strategy B pros — zero port risk, every provider/extension free, drop-in
+Workspace compat. Cons — ships 50-200 MB Python runtime, 8-15 s cold start,
+debugging crosses a process boundary.
+
+**Mixed (most realistic):** B for `/api/v1/*` (Python sidecar), A for the
+UI-owned surface (settings, credentials, codegen client types). A thin TS
+`OBBject` type generated from `/openapi.json` at build time gives the
+renderer type-safe access without re-porting fetchers.
 
 ## Known bugs and port-time fixes
 
