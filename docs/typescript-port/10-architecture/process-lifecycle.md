@@ -137,65 +137,29 @@ TS port should consolidate behind typed helpers.
 
 ## Kill strategies
 
-Four mechanisms, used in different combinations by different stop paths.
+Four mechanisms, combined differently by each stop path.
 
-### 1. Port-based kill (preferred for servers)
+| # | Strategy | How | Used by |
+|---|---|---|---|
+| 1 | **Port-based** | macOS: `lsof -ti tcp:<port> -sTCP:LISTEN` → `kill -9`. Linux: `fuser -k <port>/tcp` + `lsof` backup. Windows: `netstat -ano \| findstr LISTENING` → `taskkill /F /PID`. | `stop_backend_service` (when port known) + `stop_jupyter_server` (always — port extracted from stored URL). Most reliable: kills the real server regardless of wrapper/grandchild structure. |
+| 2 | **PID-based** | `kill -9 <pid>` / `taskkill /F /PID` on stored `backend.pid` (may be wrapper or server depending on race). | `stop_backend_service` fallback. |
+| 3 | **Tracked-child** | `Child::kill()` + `Child::wait()` on the `RunningProcesses` entry. SIGKILL only. | `stop_backend_service` — but kills only the wrapper bash/cmd; uvicorn survives as init-reparented orphan. |
+| 4 | **Brute-force pattern** | Unix: `pkill -f <pattern>` matching install dir/conda binary. Windows: `taskkill /F /FI "WINDOWTITLE eq ..."` + `taskkill /F /IM`. | `abort_installation` only (`startup.rs:1097`). |
 
-When the server bound a known TCP port, kill whatever is listening on that
-port. Used by `stop_backend_service` (when `backend.port` is set) and by every
-`stop_jupyter_server` call (port extracted from the stored URL via
-`extract_port_from_url` at `jupyter.rs:496-531`).
+`stop_backend_service` (`backends.rs:561-573`) runs strategies **1, 2, and 3
+in sequence** — redundancy is load-bearing. `stop_jupyter_server`
+(`jupyter.rs:291-485`) uses only strategy 1.
 
-| OS | Command | Notes |
-|---|---|---|
-| macOS | `lsof -ti tcp:<port> -sTCP:LISTEN` → `kill -9 <pid>` per result | Jupyter does it right; backends omit `-sTCP:LISTEN` (kills clients too — bug) |
-| Linux | `fuser -k <port>/tcp` primary, `lsof -ti` backup | Same `-sTCP:LISTEN` issue for backends |
-| Windows | `netstat -ano \| findstr :<port> \| findstr LISTENING` → `taskkill /F /PID <pid>` | Listener filter correct on Windows |
-
-This is the **most reliable** strategy because it kills the actual server
-regardless of which intermediate wrapper/grandchild owns it. Jupyter relies on
-this exclusively (the stored PID is just the conda wrapper).
-
-> ⚠️ BUG: backend port-kill on macOS/Linux omits `-sTCP:LISTEN` filter
-> (`backends.rs:362-407`). Kills any process with a TCP connection to that
-> port, not just listeners — including the desktop app's own webview if it's
-> holding a websocket. Jupyter has the filter (`jupyter.rs:380-386`); the
-> divergence is almost certainly an oversight.
-
-### 2. PID-based kill (fallback)
-
-`kill -9 <pid>` (Unix) / `taskkill /F /PID <pid>` (Windows). Used when no port
-is known (fallback inside `stop_backend_service`) and on the PID stored in
-`backend.pid`, which may be wrapper OR server depending on race timing.
-
-### 3. Tracked-child kill (wrapper only)
-
-`Child::kill()` + `Child::wait()` on the entry in `RunningProcesses`. **Kills
-only the wrapper bash/cmd process** — uvicorn or jupyter survives as an orphan
-reparented to init. This is why path 1 is needed even when path 3 succeeds.
-
-### 4. Brute-force pattern kill (install abort only)
-
-Used by `abort_installation` (`startup.rs:1097-1101`):
-
-- Unix: `pkill -f <pattern>` matching the installation directory and conda binary
-- Windows: `taskkill /F /FI "WINDOWTITLE eq ..."` plus `taskkill /F /IM`
-
-Reserved for cases where no PID is tracked (the installer runs and we just want
-everything related dead).
-
-### Stop-path convergence
-
-`stop_backend_service` (`backends.rs:561-573`) runs **all three of (1) (2) (3)**
-in sequence by design — redundancy is load-bearing because any single path can
-fail. `stop_jupyter_server` (`jupyter.rs:291-485`) uses only path (1).
+> ⚠️ BUG: backend port-kill omits `-sTCP:LISTEN` on macOS/Linux
+> (`backends.rs:362-407`) — kills any process with a TCP connection to that
+> port, not just listeners. Jupyter has the filter (`jupyter.rs:380-386`); the
+> divergence is an oversight.
 
 > ⚠️ BUG: for a non-uvicorn backend whose logs lack `Started server process [N]`
-> AND whose banner contains no IPv4/localhost URL (so `backend.port` is unknown),
-> **none of the three paths kills the actual server.** Wrapper dies, server
-> orphans. Frontend shows `stopped` while the process keeps running. Port should
-> kill the entire process tree (`pkill -P <wrapper>` on Unix; `taskkill /T /PID`
-> on Windows).
+> AND has no IPv4/localhost URL (so `backend.port` is unknown), **none of the
+> three paths kills the actual server.** Wrapper dies, server orphans, UI shows
+> `stopped` while the process keeps running. Port should kill the process tree
+> (`pkill -P <wrapper>` on Unix; `taskkill /T /PID` on Windows).
 
 ## Cleanup cascade on quit
 
