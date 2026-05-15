@@ -34,9 +34,9 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 
 | # | v2 deep-dive | Reads (v1) | Status |
 |---|---|---|---|
-| 1 | Installation v2 | `installation.md` + `app-shell.md` + `environments.md` + `ipc-bridge.md` | 🟡 |
+| 1 | Installation v2 | `installation.md` + `app-shell.md` + `environments.md` + `ipc-bridge.md` | ✅ → `installation.v2.md` |
 | 2 | Environments v2 | `environments.md` + `installation.md` + `backend-services.md` + `logs-streaming.md` + `ipc-bridge.md` | ✅ → `environments.v2.md` |
-| 3 | Backends v2 | `backend-services.md` + `logs-streaming.md` + `environments.md` + `platform-rest-api.md` + `ipc-bridge.md` | 🟡 |
+| 3 | Backends v2 | `backend-services.md` + `logs-streaming.md` + `environments.md` + `platform-rest-api.md` + `ipc-bridge.md` | ✅ → `backend-services.v2.md` |
 | 4 | API Keys v2 | `api-keys.md` + `platform-rest-api.md` + `installation.md` + `ipc-bridge.md` | ✅ → `api-keys.v2.md` |
 | 5 | Logs v2 | `logs-streaming.md` + `backend-services.md` + `environments.md` + `ipc-bridge.md` | ✅ → `logs-streaming.v2.md` |
 | 6 | App Shell v2 | `app-shell.md` + `installation.md` + `backend-services.md` + `ipc-bridge.md` | ✅ → `app-shell.v2.md` |
