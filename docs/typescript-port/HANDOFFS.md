@@ -58,7 +58,7 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 | `20-features/feature-tray-and-autostart.md` | `raw-deep-dives/app-shell.md` + `app-shell.v2.md` | ✅ |
 | `20-features/feature-uninstall.md` | `raw-deep-dives/app-shell.md` + `app-shell.v2.md` | ✅ |
 | `20-features/feature-platform-rest-api.md` | `raw-deep-dives/platform-rest-api.md` + `platform-rest-api.v2.md` | ✅ |
-| `20-features/feature-cli-repl.md` | `raw-deep-dives/cli-repl.md` | 🟡 |
+| `20-features/feature-cli-repl.md` | `raw-deep-dives/cli-repl.md` | ✅ |
 
 ### Wave 3 — Architecture + port strategy (queued)
 
