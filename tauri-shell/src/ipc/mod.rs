@@ -14,6 +14,18 @@ pub mod helpers;
 pub mod uninstall;
 pub mod certs;
 pub mod app;
+// Python REST proxy + workspace + typed wrappers
+pub mod obb;
+pub mod obb_routes;
+pub mod openbb_meta;
+pub mod provider;
+// Settings file API
+pub mod settings_files;
+// Server lifecycle
+pub mod server;
+pub mod mcp;
+// Routine (.openbb) files
+pub mod routines;
 
 /// Typed error returned by every command. Serializes as a tagged JSON
 /// object so the renderer can match on `kind` instead of parsing strings.

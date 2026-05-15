@@ -11,6 +11,7 @@ pub mod path_utils;
 pub mod process_kill;
 pub mod process_monitor;
 pub mod process_spawn;
+pub mod proxy;
 pub mod settings;
 pub mod state;
 pub mod tray;

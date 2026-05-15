@@ -12,6 +12,9 @@ default-run = "tauri-shell"
 tauri-build = { version = "2.5", features = [] }
 
 [dependencies]
+# HTTP client for Python REST proxy
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
 # Tauri core + plugins
 tauri = { version = "2.10", features = ["tray-icon", "devtools"] }
 tauri-plugin-log = "2"
