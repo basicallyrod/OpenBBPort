@@ -49,7 +49,7 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 |---|---|---|
 | `20-features/feature-installation.md` | `raw-deep-dives/installation.md` | ✅ |
 | `20-features/feature-environments.md` | `raw-deep-dives/environments.md` + `environments.v2.md` | ✅ |
-| `20-features/feature-extensions.md` | `raw-deep-dives/environments.md` + `installation.md` | ⬜ |
+| `20-features/feature-extensions.md` | `raw-deep-dives/environments.md` + `environments.v2.md` + `installation.md` + `installation.v2.md` | ✅ |
 | `20-features/feature-backend-services.md` | `raw-deep-dives/backend-services.md` + `backend-services.v2.md` + `logs-streaming.md` + `logs-streaming.v2.md` | ✅ |
 | `20-features/feature-jupyter.md` | `raw-deep-dives/logs-streaming.md` + `logs-streaming.v2.md` + `environments.md` + `environments.v2.md` | ✅ |
 | `20-features/feature-api-keys.md` | `raw-deep-dives/api-keys.md` + `api-keys.v2.md` | ✅ |

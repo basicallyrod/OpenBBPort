@@ -353,26 +353,19 @@ reflective work at process start. Boot then <500 ms.
 
 ## ▸ Interfaces with
 
-- **depends-on** `feature-installation.md` — the Python env that ships
-  `openbb-platform-api` and `openbb-mcp-server` is created by the installer
-  Steps 2+3.
+- **depends-on** `feature-installation.md` — installer Steps 2+3 create the
+  Python env that ships `openbb-platform-api` + `openbb-mcp-server`.
 - **depends-on** `feature-environments.md` — must run from a conda env that
-  has both packages installed; environment management is the layer that
-  guarantees this.
-- **depends-on** `feature-api-keys.md` for the **content of
-  `user_settings.json`** that this server reads on every request. The
-  desktop's API Keys UI is the writer; this server is a read-only consumer.
-- **depended-on-by** `feature-backend-services.md` — the entire backends UI
-  exists to start/stop this server (and `openbb-mcp`). Default seed services
-  are exactly these two.
-- **depended-on-by** `feature-cli-repl.md` — the planned CLI/REPL feature
-  (Python SDK in-process or remote) uses the same `OBBject` JSON shape.
+  has both packages installed.
+- **depends-on** `feature-api-keys.md` for the content of
+  `user_settings.json` (server is read-only consumer; UI is writer).
+- **depended-on-by** `feature-backend-services.md` — the backends UI exists
+  to start/stop this server (and `openbb-mcp`).
+- **depended-on-by** `feature-cli-repl.md` — uses the same `OBBject` JSON.
 - **shares-state-with** `feature-api-keys.md` via
-  `~/.openbb_platform/user_settings.json` (server reads, UI writes — no
-  reload required since the read is per-request).
-- **independent-of** `feature-logs-streaming.md` and
-  `feature-jupyter.md` (those are about HOW the desktop runs subprocesses,
-  not WHAT the subprocesses do).
+  `~/.openbb_platform/user_settings.json` (read on every request).
+- **independent-of** `feature-logs-streaming.md` and `feature-jupyter.md`
+  (those concern HOW the desktop runs subprocesses, not WHAT they do).
 
 ## TS port mapping
 
@@ -402,91 +395,71 @@ build time gives the renderer type-safe access without re-porting fetchers.
 
 ## Known bugs and port-time fixes
 
-> ⚠️ BUG: **Port auto-increment hides the bound port from the caller.**
-> `check_port` (`extensions/platform_api/openbb_platform_api/utils/api.py:82-93`)
-> silently increments the requested port until one is free. The desktop's
-> `backends.json` records the *requested* port; the actually-bound port
-> appears only in the uvicorn log line. The port should either fail loudly
-> on conflict or report the chosen port back through a structured channel
-> (file, IPC, env var written by the child).
+> ⚠️ BUG: **Port auto-increment hides the bound port.** `check_port`
+> (`utils/api.py:82-93`) silently increments until free. `backends.json`
+> records the *requested* port; the bound port appears only in stdout. Port
+> should fail loudly OR report the chosen port via a structured channel.
 
-> ⚠️ BUG: **`UserSettings` is re-read from disk on every request.** Even with
-> auth disabled, the default value of the hidden `__authenticated_user_settings`
-> dependency is `UserSettings()` whose `__init__` does
-> `json.load(open(USER_SETTINGS_PATH))` (`model/user_settings.py:22-41`,
-> `commands.py:244`). On a hot path this is a per-request disk read. The
-> port should cache the parsed settings with an `mtime` check.
+> ⚠️ BUG: **`UserSettings` re-read on every request.** Even with auth off,
+> the default of the hidden `__authenticated_user_settings` dep is
+> `UserSettings()` whose `__init__` does `json.load(USER_SETTINGS_PATH)`.
+> Per-request disk read on hot path. Port should cache with mtime check.
 
-> ⚠️ BUG: **Cold start is 8-15 s on a full install** before the listen
-> socket binds. Caused by eager `ProviderInterface` build, `app.openapi()`,
-> and `get_widgets_json()` at import. The desktop "Start" button shows a
-> spinner the whole time with no progress signal.
+> ⚠️ BUG: **Cold start 8-15 s on a full install** before listen socket
+> binds. Eager `ProviderInterface`, `app.openapi()`, `get_widgets_json()`.
+> Spinner-with-no-signal UX.
 
 > ⚠️ BUG: **`OpenBBErrorResponse.error_kind` is documented but never
-> populated.** The route decorator pre-declares it in OpenAPI
-> (`app/router.py:137-156`); no exception handler writes to it
-> (`exception_handlers.py`). Clients that branch on `error_kind` get
-> `undefined`.
+> populated.** Route decorator declares it (`router.py:137-156`); no handler
+> writes to it. Clients branching on it get `undefined`.
 
-> ⚠️ BUG: **`/apps.json` silently drops apps whose widgets aren't installed.**
-> If a user uninstalls FMP, every saved app referencing `*_fmp_obb` widgets
-> disappears with no log line (`main.py:220-244`). The port should surface
-> a warning per-app, not just drop them.
+> ⚠️ BUG: **`/apps.json` silently drops apps with missing widgets.** Uninstall
+> FMP → all FMP apps vanish without log line (`main.py:220-244`). Port should
+> surface a per-app warning.
 
-> ⚠️ BUG: **`/apps.json` GET has a write side effect** — it auto-creates
-> `~/OpenBBUserData/workspace_apps.json` as `[]` if missing (`main.py:183-189`).
-> A GET that writes a file is surprising; a port should either keep the
-> behaviour for Workspace compat or initialise the file at install time.
+> ⚠️ BUG: **`/apps.json` GET has a write side effect** — auto-creates
+> `~/OpenBBUserData/workspace_apps.json` as `[]` if missing
+> (`main.py:183-189`). Initialise at install time instead.
 
-> ⚠️ BUG: **`maybe_coroutine` runs sync user code on the event loop.** No
+> ⚠️ BUG: **`maybe_coroutine` runs sync code on the event loop.** No
 > thread-pool wrapping (`provider/utils/helpers.py:581-588`). A blocking
-> `requests.get(...)` inside a sync `extract_data` blocks the entire
-> uvicorn worker for the duration of the upstream call.
+> `requests.get` in a sync `extract_data` blocks the worker for the upstream
+> call.
 
 > ⚠️ BUG: **`merge_agents.py:49` typos `startwith` for `startswith`.** The
-> prefix-rewrite branch raises `AttributeError` if ever taken. Effectively
-> dead code for additional agents. The port should not re-emulate.
+> prefix-rewrite branch raises `AttributeError`. Dead code; do not re-emulate.
 
-> ⚠️ BUG: **`.env` changes require a server restart.** `Env()` snapshots
-> `os.environ` at module import; the API Keys file allow-list lets users
-> edit `.env` but no restart is triggered. The desktop UI should wire an
-> `.env`-mtime watcher to a restart prompt.
+> ⚠️ BUG: **`.env` changes require restart.** `Env()` snapshots `os.environ`
+> at module import; API Keys UI allows editing `.env` but no restart is
+> triggered. Wire an mtime watcher to a restart prompt.
 
-> ⚠️ BUG: **MCP↔REST coupling is implicit.** The MCP server's tools call
-> back into the REST server via HTTP. If REST is down or its port drifted,
-> every MCP tool 502s. The desktop backends UI shows them as independent.
+> ⚠️ BUG: **MCP↔REST coupling implicit.** MCP tools call back to REST via
+> HTTP; if REST is down or port drifted, every MCP tool 502s. Backends UI
+> shows them as independent.
 
 ## Open questions
 
-1. **Provider portability scope (Strategy A).** Which subset is "in"? The
-   Easy bucket (FMP/Polygon/Intrinio/Tiingo/Alpha Vantage/FRED/IMF/OECD/BLS/
-   Tradier/Nasdaq) covers ~70% of Workspace's day-to-day data needs. The
-   Hard bucket (yfinance, multpl, tmx, seeking_alpha, stockgrid) needs TLS
-   impersonation or HTML scraping and is a maintenance treadmill — Yahoo
+1. **Provider portability scope (Strategy A).** Easy bucket
+   (FMP/Polygon/Intrinio/Tiingo/Alpha Vantage/FRED/IMF/OECD/BLS/Tradier/Nasdaq)
+   covers ~70% of Workspace data needs. Hard bucket (yfinance, multpl, tmx,
+   seeking_alpha, stockgrid) needs TLS impersonation / HTML scraping — Yahoo
    periodically breaks scrapers. Drop or proxy?
-2. **SDK codegen — build-time vs runtime.** If we go A or mixed: do we run
-   `openbb-api` once at TS build time to dump `/openapi.json` and codegen
-   Zod schemas + types into the bundle? Or accept a one-time dump per
-   release? Or fetch `/openapi.json` at runtime in the renderer and trust
-   it? Build-time gives static types; runtime adapts to the user's
-   installed provider set.
-3. **One MCP, one REST, or merged?** The Python install runs two processes
-   each with a full `ProviderInterface` singleton. A TS rewrite could
-   trivially host both protocols from one HTTP server. Drop MCP entirely
-   if Workspace + desktop are the only consumers?
-4. **Per-tenant `UserSettings`.** The extension auth contract supports
-   per-user settings (each request returns a different `UserSettings`).
-   Desktop is single-user — do we need this generality at all, or strip it
-   for simplicity?
-5. **Chart construction.** `chart.content` is Plotly JSON either way, so
-   rendering ports cleanly. But the `openbb-charting` extension can
-   construct figures server-side from raw results. Do we re-host this in
-   Python (Strategy B) or assume the renderer always builds figures
-   client-side with Plotly.js?
-6. **Pandas-flavoured `OBBject` methods.** `to_df/to_polars/to_numpy/to_dict/to_llm`
-   are client-side and never run on the server. If the TS port exposes an
-   `obb` SDK to user JS code, what abstraction stands in? `arquero`?
-   `tinyframe`? Just raw arrays?
+2. **SDK codegen — build-time vs runtime?** Build-time gives static types
+   but requires running `openbb-api` once per release to dump
+   `/openapi.json`. Runtime adapts to the user's installed provider set but
+   has no compile-time guarantees.
+3. **One MCP, one REST, or merged?** Python runs two processes each with a
+   full `ProviderInterface`. A TS rewrite could trivially host both protocols
+   from one HTTP server. Drop MCP if Workspace + desktop are the only
+   consumers?
+4. **Per-tenant `UserSettings`.** Extension auth contract supports per-user
+   settings; desktop is single-user. Do we need this generality?
+5. **Chart construction.** `chart.content` is Plotly JSON either way.
+   `openbb-charting` constructs figures server-side. Re-host in Python
+   (B) or always build client-side with Plotly.js?
+6. **Pandas-flavoured `OBBject` methods** (`to_df/to_polars/to_dict/to_llm`)
+   are client-side. If the TS port exposes an `obb` SDK to user JS, what
+   tabular abstraction stands in — `arquero`, `tinyframe`, or raw arrays?
 
 ## Cross-feature dependencies
 

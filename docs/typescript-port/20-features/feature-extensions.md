@@ -7,10 +7,9 @@
 ## Purpose
 
 The desktop curates a set of Python packages inside each managed conda env so
-the embedded OpenBB Platform server can expose their FastAPI routes. The user
-needs a UI to install, update, and remove these packages without touching a
-shell. This feature is the pip/conda glue between the catalog JSON, the
-env-on-disk, and the per-env `<env>.yaml` manifest used by later operations.
+the embedded OpenBB Platform server can expose their FastAPI routes. This
+feature is the pip/conda glue between the catalog JSON, the env-on-disk, and
+the per-env `<env>.yaml` manifest used by later operations.
 
 ## User flows
 
@@ -45,15 +44,10 @@ env-on-disk, and the per-env `<env>.yaml` manifest used by later operations.
 
 ### The catalog (frontend-only, no Tauri, no caching)
 
-Both selectors `fetch()` on every modal open from public OpenBB GitHub raw URLs:
-
-- `https://raw.githubusercontent.com/OpenBB-finance/OpenBB/refs/heads/main/assets/extensions/provider.json`
-- `https://raw.githubusercontent.com/OpenBB-finance/OpenBB/refs/heads/main/assets/extensions/router.json`
-- `https://raw.githubusercontent.com/OpenBB-finance/OpenBB/refs/heads/main/assets/extensions/obbject.json`
-
+Both selectors `fetch()` on every modal open from three public OpenBB GitHub raw URLs:
+`https://raw.githubusercontent.com/OpenBB-finance/OpenBB/refs/heads/main/assets/extensions/{provider,router,obbject}.json`.
 Entry shape (`installation-progress.tsx:23-29`):
 `{ packageName, reprName?, description?, credentials?: string[], instructions?: string|null }`.
-
 Four UI categories plus hard-coded `extrasExtensions`:
 
 | Category | Source | Wire format on install |
@@ -71,31 +65,25 @@ special `--no-deps + openbb-build` path (see below).
 
 ```mermaid
 flowchart TD
-  UI[Add Extension UI selector]
-  catalog[GitHub raw extension JSON<br/>provider / router / obbject]
-  UI -- fetch on modal open --> catalog
+  UI[Add Extension selector] -- fetch on modal open --> catalog[GitHub raw JSON<br/>provider/router/obbject]
   UI -- builds string[] in wire format --> encode
 
   subgraph encode[wire format]
     A[conda:&lt;channel&gt;:&lt;pkg&gt;]
     B[plain PyPI string]
-    C["openbb literal (case-insensitive)"]
+    C["openbb literal"]
   end
 
   encode -- invoke install_extensions --> handler[install_extensions_impl<br/>environments.rs:2344-2679]
-
   handler --> split[split into conda_pkgs / pip_pkgs / has_openbb]
-
-  split -- conda_pkgs --> condaCmd[conda install -n &lt;env&gt; -y &lt;pkgs...&gt;]
-  split -- pip_pkgs --> pipCmd[&lt;env_python&gt; -m pip install &lt;pkgs...&gt;]
-  split -- has_openbb --> openbbCmd["&lt;env_python&gt; -m pip install openbb --no-deps<br/>then run openbb-build"]
-
-  condaCmd --> yaml[read &lt;env&gt;.yaml<br/>merge new pkgs<br/>save_environment_as_yaml_impl]
+  split -- conda_pkgs --> condaCmd[conda install -n &lt;env&gt; -y &lt;pkgs&gt;]
+  split -- pip_pkgs --> pipCmd[&lt;env_python&gt; -m pip install &lt;pkgs&gt;]
+  split -- has_openbb --> openbbCmd["pip install openbb --no-deps<br/>then openbb-build"]
+  condaCmd --> yaml[read &lt;env&gt;.yaml<br/>merge<br/>save_environment_as_yaml_impl]
   pipCmd --> yaml
   openbbCmd --> yaml
-
   yaml --> done[returns bool]
-  done --> ui2[refreshEnvironmentUIState → get_environment_extensions → cache update]
+  done --> ui2[refreshEnvironmentUIState → get_environment_extensions → cache]
 ```
 
 ## IPC contract
@@ -115,19 +103,16 @@ flowchart TD
 
 ### Wire-format encoding parser (Rust side)
 
-`install_extensions_impl` (`environments.rs:2390-2422`):
-- starts with `conda:` → strip prefix, push **verbatim rest** to `conda_packages`
-  (e.g. `conda-forge:numpy`).
-- equals `openbb` (case-insensitive) → set `has_openbb=true`, skip both lists.
-- otherwise → push to `pip_packages`.
+`install_extensions_impl` (`environments.rs:2390-2422`): starts with `conda:` →
+strip prefix, push **verbatim rest** to `conda_packages` (e.g. `conda-forge:numpy`);
+equals `openbb` (case-insensitive) → set `has_openbb=true`, skip both lists;
+otherwise → push to `pip_packages`.
 
-`remove_extension` mirror parser (`environments.rs:2059-2070`) splits on
-first `:`:
-- contains `:` → `("conda", &package[idx+1..])` (drops channel for `conda remove`).
-- no `:` → `("pip", package)`.
-
-So on-disk YAML stores `<channel>:<pkg>` for conda items, frontend renders with
-the prefix, and the parser strips it for the actual `conda remove` call.
+`remove_extension` mirror parser (`environments.rs:2059-2070`) splits on first
+`:` → contains `:` becomes `("conda", &package[idx+1..])` (drops channel for
+`conda remove`); no `:` becomes `("pip", package)`. So the on-disk YAML stores
+`<channel>:<pkg>` for conda items and the parser strips it for the actual
+`conda remove` call.
 
 ## State surfaces
 
