@@ -9,36 +9,30 @@ wrappers** registered in `src/main.rs::generate_handler!`.
 
 Every OpenBB REST route (`/equity/price/historical`, `/economy/cpi`,
 `/technical/rsi`, ...) is also exposed as its own first-class Tauri command
-(`equity_price_historical`, `economy_cpi`, `technical_rsi`). The TS frontend
-can `invoke<Value>("equity_price_historical", { params: { symbol: "AAPL" }})`
+(`equity_price_historical`, `economy_cpi`, `technical_rsi`). The TS
+frontend can `invoke<Value>("equity_price_historical", { params: {...} })`
 instead of `invoke<Value>("obb_call", { route: "/equity/price/historical",
 params: {...} })`.
 
-Why bother — the generic `obb_call` in
-`src/ipc/obb.rs` (referenced from `src/main.rs:144`) already handles every
-route. The typed wrappers exist because:
+The generic `obb_call` in `src/ipc/obb.rs` (`src/main.rs:144`) already
+handles every route. Typed wrappers exist for:
 
-- **TS autocomplete.** A generated `invoke()` binding (Slice A's `ts-rs` or
-  any hand-rolled `Commands` enum) shows `equity_price_historical` in the
-  IDE's autocomplete list. A typo in a string route (`"/equity/prce/hist"`)
-  is not catchable at compile time; a typo in a command name is.
+- **TS autocomplete.** A typed `invoke()` (Slice A's ts-rs or a hand-rolled
+  union) shows `equity_price_historical` in the IDE; a typo in a route
+  string is not caught at compile time, a typo in a command name is.
 - **Route-not-found at compile time.** `tauri::generate_handler![...]` in
-  `src/main.rs:74` is a macro: a missing command name in the list is a
-  Rust compile error. Adding a typed wrapper forces it to be registered.
-- **Easy refactor.** Renaming `/equity/price/quote` → `/equity/price/quotes`
-  on the Python side requires changing exactly one route literal in one
-  Rust function. The function name (`equity_price_quote`) stays the same;
-  TS callers are unaffected.
-- **Per-route metrics hook point.** Future work — log/trace/cache per
-  function — only needs to wrap `call_get` / `call_post` in those modules.
-- **Discoverability.** `cargo doc` lists 255 functions, each a one-liner
-  pointing at a route, making the catalog browsable from rustdoc.
+  `src/main.rs:74` is a macro — a missing ident is a Rust compile error.
+- **Easy refactor.** Renaming `/equity/price/quote` → `/quotes` on the
+  Python side touches exactly one route literal in one Rust function;
+  the function name (`equity_price_quote`) and TS callers are unaffected.
+- **Per-route hook point.** Future log/trace/cache only needs to wrap
+  `call_get` / `call_post`.
+- **Discoverability.** `cargo doc` lists 255 one-line functions.
 
-The wrappers are intentionally **un-typed in their parameter struct** — the
+Wrappers are intentionally **un-typed in their parameter struct** — the
 arg is `Option<Map<String, Value>>`, not a per-route Pydantic-equivalent.
-Adding strict typing here duplicates `/openapi.json`; the TS side's
-type-generation tool is the right place for that. See
-`src/ipc/obb_routes.rs:1-12` for that design rationale.
+Strict typing here duplicates `/openapi.json`; TS-side `openapi-typescript`
+owns that. See `src/ipc/obb_routes.rs:1-12` for the design rationale.
 
 ## 2. Coverage stats
 
@@ -48,29 +42,23 @@ type-generation tool is the right place for that. See
 | `src/ipc/obb_routes_extended.rs`|      167 |  1487 | Every remaining route from `openbb_platform/extensions/**/*_router.py` |
 | **Total**                       |  **255** | **2243** | **all 255 unique routes; zero overlap** |
 
-`cargo check` baseline:
+Counts (via `grep -c '#\[tauri::command\]'` + `grep -c '<module>::'`):
 
-```
-$ grep -c '#\[tauri::command\]' src/ipc/obb_routes.rs                  # → 88
-$ grep -c '#\[tauri::command\]' src/ipc/obb_routes_extended.rs         # → 168 (1 in module-docs)
-                                                                       # → 167 actual fns
-$ grep -c 'obb_routes::'         src/main.rs                           # → 88
-$ grep -c 'obb_routes_extended::'src/main.rs                           # → 167
-```
+| Source                          | `#[tauri::command]` | `generate_handler!` |
+|---------------------------------|--------------------:|--------------------:|
+| `obb_routes.rs`                 |                  88 |                  88 |
+| `obb_routes_extended.rs`        | 168 (1 in docstring) |                 167 |
 
-The SPEC.md target was "184 routes" (§2 Slice C, line 138 / line 176). The
-true surface — discovered by scanning every `@router.command(model=…)` in
-`openbb_platform/extensions/**/*_router.py` — is **247 GET routes + 8 deep
-POST endpoints we already covered = 255**. No overlap between the two
-files: `comm -12 routes_orig.txt routes_extended.txt` returns empty. The
-"~184" estimate in SPEC was conservative; the real count includes the FRED
-sub-routes, all 22 technical indicators, all 15 quantitative methods, and
-all 12 econometrics tests.
+SPEC §2 Slice C estimated "184 routes". The true surface — every
+`@router.command(model=…)` in `openbb_platform/extensions/**/*_router.py`
+— is **255 unique routes**, all covered. No overlap between the two
+files: `comm -12 routes_orig.txt routes_extended.txt` is empty. The
+SPEC estimate was conservative; the real count includes FRED sub-routes,
+all 22 technical indicators, all 15 quantitative methods, and all 12
+econometrics tests.
 
-Routes still not wrapped: the metadata endpoints (`/economy/calendar_v2`,
-provider-specific `_legacy_*` paths) and the four debug-only routes —
-all five are covered by the generic `obb_call` and judged not worth a
-named wrapper.
+Routes not wrapped: a handful of debug/metadata/legacy endpoints. They
+remain reachable via the generic `obb_call`; not worth a named wrapper.
 
 ## 3. Coverage table by extension family
 
@@ -111,25 +99,12 @@ Citations are `<file>:<start>–<end>` where the section comment banner lives.
 | quantitative (capm, performance/sortino, rolling ×6, stats ×6, unitroot_test) POST | 15 | `obb_routes_extended.rs:1237–1374` |
 | econometrics (autocorrelation, cointegration, ols_summary, panel ×5, residual_autocorrelation, unit_root, VIF) POST | 12 | `obb_routes_extended.rs:1376–1487` |
 
-### Combined view
+### Combined rollup
 
-| Family-rollup | Total wrappers |
-|---|---:|
-| equity (all sub-areas)         | 70 |
-| economy (all)                  | 42 |
-| fixedincome (all)              | 26 |
-| technical (POST, all)          | 27 |
-| quantitative (POST, all)       | 20 |
-| econometrics (POST, all)       | 15 |
-| regulators (sec + cftc)        | 11 |
-| etf (all)                      | 12 |
-| derivatives                    |  8 |
-| commodity                      |  8 |
-| index                          |  7 |
-| currency                       |  5 |
-| crypto                         |  2 |
-| news                           |  2 |
-| **TOTAL**                      | **255** |
+equity 70 · economy 42 · technical (POST) 27 · fixedincome 26 ·
+quantitative (POST) 20 · econometrics (POST) 15 · etf 12 ·
+regulators 11 · derivatives 8 · commodity 8 · index 7 · currency 5 ·
+crypto 2 · news 2 · **= 255**
 
 ## 4. Pattern: the `call_get` / `call_post` helpers
 
@@ -161,31 +136,21 @@ pub async fn equity_price_historical(
 }
 ```
 
-**Why duplicated?** Two reasons:
-- `call_get` / `call_post` are `pub(self)` (default `fn`), and the module
-  boundary between `obb_routes` and `obb_routes_extended` is enforced by
-  Rust — a sibling module cannot import a private symbol.
-- Promoting the helpers to `pub` (or extracting to a third helper module
-  like `obb_call_helpers`) would either pollute the public API of the
-  crate or add a new module purely for two ~15-line functions. Net win
-  was judged trivial. Each file is self-contained and copy-paste verified.
+**Why duplicated?** `call_get` / `call_post` are `pub(self)`; the module
+boundary between `obb_routes` and `obb_routes_extended` is enforced by
+Rust, so a sibling cannot import a private symbol. Promoting them to
+`pub` or extracting to a third helper module would either pollute the
+crate's public API or add a module for two ~15-line functions. Net win
+was judged trivial; each file is self-contained. If a third wrapper file
+ever appears, extract to `src/ipc/obb_helpers.rs` with `pub(super)`
+visibility (see §10).
 
-If we ever add a third wrapper file (e.g. `obb_routes_v2.rs` for v2 routes
-that share a new auth scheme), the right move is to extract the helpers
-into `src/ipc/obb_helpers.rs` and `pub(super)`-expose them. See §10.
-
-**Why `Option<Map<String, Value>>`?** Three desiderata:
-- TS can `invoke("equity_search", { params: undefined })` — `None` arm.
-- TS can `invoke("equity_search", { params: { query: "AAPL" } })` —
-  `Some(map)` arm.
-- The `Map` preserves insertion order (vs `HashMap`) — useful for routes
-  that depend on `start_date`/`end_date` being adjacent in the query string
-  even though `reqwest` reorders.
-
-Routes are *case-sensitive* and *trailing-slash-sensitive*; the route
-literal matches the FastAPI server's path 1:1. The `Proxy::build_url`
-method (`src/proxy.rs:167–180`) prepends `/api/v1/` and strips any leading
-slash from the user-supplied route.
+**Why `Option<Map<String, Value>>`?** TS can pass `params: undefined`
+(→ `None`) or `params: { ... }` (→ `Some(map)`); `Map` preserves
+insertion order (vs `HashMap`). Routes are case- and trailing-slash-
+sensitive; the literal matches the FastAPI server 1:1. `Proxy::build_url`
+(`src/proxy.rs:167–180`) prepends `/api/v1/` and strips any leading
+slash.
 
 ## 5. Naming convention
 
@@ -196,8 +161,8 @@ slash from the user-supplied route.
 | `/economy/shipping/port_volume`    | `economy_shipping_port_volume` |
 | `/fixedincome/rate/effr_forecast`  | `fixedincome_rate_effr_forecast` |
 | `/technical/sma` (POST)            | `technical_sma`                |
-| `/quantitative/performance/sharpe_ratio` (POST) | `quantitative_performance_sharpe` (note: trimmed `_ratio` for readability; see `obb_routes.rs:723`) |
-| `/quantitative/performance/sortino_ratio` (POST) | `quantitative_performance_sortino_ratio` (full name; see `obb_routes_extended.rs:1251`) |
+| `/quantitative/performance/sharpe_ratio` (POST) | `quantitative_performance_sharpe` (legacy trim, `obb_routes.rs:723`) |
+| `/quantitative/performance/sortino_ratio` (POST) | `quantitative_performance_sortino_ratio` (`obb_routes_extended.rs:1251`) |
 
 The mechanical rule:
 
@@ -214,12 +179,10 @@ The one exception is the `obb_*` family in `src/ipc/obb.rs` (the generic
 prefix because they are *not* tied to a single route; they are
 infrastructure commands that wrap the proxy itself.
 
-Some manual renames for clarity (see `obb_routes.rs:723` —
-`quantitative_performance_sharpe` instead of
-`quantitative_performance_sharpe_ratio`). These were judgment calls; the
-later file (`obb_routes_extended.rs`) sticks to the strict mechanical rule
-to avoid drift. If we ever rewrite from scratch, normalize on the strict
-rule.
+A few manual renames for brevity exist in the older file (e.g.
+`quantitative_performance_sharpe` at `obb_routes.rs:723` instead of
+`..._sharpe_ratio`). The newer file sticks to the strict rule; normalize
+on the strict rule in a follow-up.
 
 ## 6. Adding a new wrapper — step by step
 
@@ -286,15 +249,14 @@ tauri_shell::ipc::obb_routes_extended::equity_fundamental_peer_comparisons,
 ### Step 5 — verify
 
 ```bash
-cd tauri-shell
-cargo check                       # macro must accept the new ident
-grep -c '#\[tauri::command\]' src/ipc/obb_routes_extended.rs   # → 168
-grep -c 'obb_routes_extended::'  src/main.rs                   # → 168
+cd tauri-shell && cargo check
+grep -c '#\[tauri::command\]' src/ipc/obb_routes_extended.rs   # bumps by 1
+grep -c 'obb_routes_extended::' src/main.rs                    # bumps by 1
 ```
 
-If the counts diverge from `generate_handler!`'s, Tauri will refuse to
-register the command at runtime. The macro will compile-fail if the
-identifier is missing in either module.
+The macro compile-fails if the identifier is missing in either module.
+Mismatched counts between source and `generate_handler!` are a silent
+runtime fail — Tauri just won't register the unlisted command.
 
 ## 7. POST vs GET — convention
 
@@ -321,211 +283,120 @@ pub async fn technical_sma(
 ```
 
 `call_post` (`obb_routes.rs:33–51` / `obb_routes_extended.rs:39–57`)
-serializes the `data` as the JSON body, and the `params` (if any) become
-the URL query string. Note its slightly lossy conversion of non-string
-query values to empty strings — this matches the Python server's
-permissive coercion but should ideally be tightened to `v.to_string()`
-in a follow-up. (Most callers only send string params, so the bug is
-latent.)
-
-All other routes (read-only data fetches) are GET and use `call_get`.
+JSON-encodes `data` as the body; `params` (if any) become the query
+string. The helper lossily converts non-string query values to `""`
+(§10 gap 2). All non-POST routes use `call_get`.
 
 In TS:
 
 ```ts
-await invoke<Value>("equity_price_historical", {
-  params: { symbol: "AAPL", provider: "yfinance" }
-});
+await invoke<Value>("equity_price_historical",
+  { params: { symbol: "AAPL", provider: "yfinance" } });
 
-await invoke<Value>("technical_sma", {
-  data: priceObbject,                       // returned by an earlier call
-  params: { length: "50", target: "close" }
-});
+await invoke<Value>("technical_sma",
+  { data: priceObbject, params: { length: "50", target: "close" } });
 ```
 
 ## 8. Verification
 
-The Slice C completion bar:
-
 ```bash
-$ cd tauri-shell
+cd tauri-shell
+cargo check                                                      # passes
+cargo build --release                                            # passes
+grep -c '#\[tauri::command\]' src/ipc/obb_routes.rs              # 88
+grep -c '#\[tauri::command\]' src/ipc/obb_routes_extended.rs     # 168 (1 in docstring)
+grep -c 'obb_routes::'        src/main.rs                        # 88
+grep -c 'obb_routes_extended::' src/main.rs                      # 167
 
-# 1. Compiles
-$ cargo check
-   Finished `dev` profile [...] target(s) in 7.42s
-
-# 2. Release build passes
-$ cargo build --release
-
-# 3. Wrapper counts match registration
-$ grep -c '#\[tauri::command\]' src/ipc/obb_routes.rs
-88
-$ grep -c '#\[tauri::command\]' src/ipc/obb_routes_extended.rs
-168                                                  # 167 fns + 1 in docstring
-$ grep -c 'obb_routes::'        src/main.rs
-88
-$ grep -c 'obb_routes_extended::' src/main.rs
-167
-
-# 4. Zero overlap
-$ grep -oE '"/[a-zA-Z0-9_/]+"' src/ipc/obb_routes.rs          | sort -u > /tmp/orig.txt
-$ grep -oE '"/[a-zA-Z0-9_/]+"' src/ipc/obb_routes_extended.rs | sort -u > /tmp/ext.txt
-$ comm -12 /tmp/orig.txt /tmp/ext.txt
-                                                     # → empty
+# Zero overlap
+grep -oE '"/[a-zA-Z0-9_/]+"' src/ipc/obb_routes.rs          | sort -u > /tmp/o.txt
+grep -oE '"/[a-zA-Z0-9_/]+"' src/ipc/obb_routes_extended.rs | sort -u > /tmp/e.txt
+comm -12 /tmp/o.txt /tmp/e.txt                                   # empty
 ```
 
-Runtime smoke test (requires Python REST server on `127.0.0.1:6900`):
+Runtime smoke (requires Python REST server on `127.0.0.1:6900`):
 
 ```bash
-$ cargo run --bin tauri-shell-cli -- obb call /equity/price/historical \
-    --param symbol=AAPL --param provider=yfinance --param start_date=2024-01-01
+cargo run --bin tauri-shell-cli -- obb call /equity/price/historical \
+  --param symbol=AAPL --param provider=yfinance --param start_date=2024-01-01
 ```
 
-The CLI (Slice G, `src/bin/cli.rs`) does **not** route through the typed
-wrappers — by design, see §9.
+The CLI (Slice G) does not route through the typed wrappers; see §9.
 
 ## 9. Integration with other slices
 
-### Slice A — TS bindings
-
-Slice A (ts-rs) exports public types: `IpcError`, the event payloads, etc.
-The `Params` alias and the `call_get` / `call_post` helpers in this slice
-are **`pub(self)`** — `ts-rs` cannot see them, and that's intentional:
-- `Params = Option<Map<String, Value>>` would generate as
-  `Record<string, unknown> | null` in TS, which is no more useful than
-  `unknown`.
-- The TS-side ergonomic surface for parameters comes from running
-  `openapi-typescript` on the Python server's `/openapi.json`, not from
-  the Rust wrappers.
-
-For each typed wrapper, Slice A's `invoke<>` typing should bind the
-**name** (a string literal type) to `(args: { params?: Record<string,
-unknown>; data?: unknown }) => Promise<Value>`. The 255 command names
-fit comfortably in a discriminated union; the TS frontend in Slice F
-demonstrates this.
-
-### Slice B — Connector trait
-
-The `Connector` trait in `src/connector.rs` is for **non-OpenBB** domain
-calls (installation, environments, backends, jupyter, server, mcp, certs,
-uninstall). All 255 typed wrappers in Slice C go **straight to the
-`Proxy`** — they do not call into the connector. This is correct: the
-OpenBB REST surface is a single first-party HTTP target, not a pluggable
-backend. A user with a custom backend who wants to override how
-`/equity/price/historical` is served should swap the `Proxy` (or insert
-a reverse proxy in front of it), not the `Connector`.
-
-### Slice D — Integration tests
-
-Out of scope for Slice C. The wrappers are 99% boilerplate — a single
-parameterized test that loops over the 255 entries and asserts each
-returns "route not found" against a `httpmock` server with a known set
-of routes would give 100% smoke coverage. Recommended pattern for
-when Slice D lands:
-
-```rust
-#[tokio::test]
-async fn typed_wrappers_round_trip_route_literal() {
-    for cmd in TYPED_WRAPPERS {
-        let server = httpmock::MockServer::start();
-        server.mock(|when, then| {
-            when.path(cmd.route);
-            then.status(200).json_body(json!({ "ok": true }));
-        });
-        // assert invoking the command hits the mocked path
-    }
-}
-```
-
-### Slice E — Docs + cookbook
-
-The expanded `README.md` (Slice E, ~861 lines) needs a section listing all
-255 wrappers. Pulling the names from `src/main.rs:160–416` (the
-`obb_routes::` and `obb_routes_extended::` blocks) is the right source —
-`generate_handler!` is the canonical list. Slice E's catalog section
-should also cite this handoff for the family-level breakdown.
-
-### Slice F — TS frontend
-
-The TS demo uses `equity_price_historical` as the headline typed-wrapper
-example (`examples/typescript-frontend/src/main.ts`). The cookbook in
-Slice E follows the same pattern. Picking a single representative
-wrapper is fine; the autocomplete benefit accrues regardless.
-
-### Slice G — CLI binary
-
-`tauri-shell-cli` exposes `obb call <route> --param k=v` (`src/bin/cli.rs`,
-the `obb` subcommand). It does **not** expose `tauri-shell-cli
-equity-price-historical --symbol AAPL`. Two reasons:
-
-- Generating 255 clap subcommands would 4–5× the CLI binary size and
-  give no benefit — the CLI user already typed the route literally.
-- The typed wrappers' value is *compile-time autocomplete on the TS side*,
-  which doesn't translate to a CLI's runtime arg parsing.
-
-The CLI uses the same `Proxy::get_with_map` / `Proxy::post` plumbing
-the typed wrappers do, so behavior is identical.
-
-### Slice H — Connector reference impls
-
-No interaction. Connector impls don't touch the OpenBB proxy. If a user's
-backend isn't OpenBB-compatible, they remove the wrappers from
-`generate_handler!` (the simplest path) rather than try to redirect them.
+- **Slice A (ts-rs).** Exports public types only. The `Params` alias and
+  the `call_get` / `call_post` helpers are `pub(self)` — `ts-rs` cannot
+  see them, intentionally: `Option<Map<String, Value>>` would generate
+  as `Record<string, unknown> | null`, no better than `unknown`. The
+  TS-side parameter typing comes from `openapi-typescript` against
+  `/openapi.json`. Slice A's `invoke<>` typing binds the command **name**
+  (a string-literal union of all 255) to `{params?, data?}`.
+- **Slice B (Connector trait).** The trait in `src/connector.rs` is for
+  non-OpenBB domain calls (installation, environments, jupyter, server,
+  mcp, certs, uninstall). All 255 typed wrappers go **straight to
+  `Proxy`** and do not consult the connector. Correct by design: OpenBB
+  is one first-party HTTP target, not a pluggable backend. To swap the
+  data source, swap `Proxy` (or front it with a reverse proxy), not the
+  `Connector`.
+- **Slice D (integration tests).** Out of scope here. The wrappers are
+  ~99% boilerplate; a single parameterized test looping over all 255
+  entries against `httpmock` would give full smoke coverage.
+- **Slice E (docs/cookbook).** The expanded README needs a 255-row
+  catalog. Source it from `src/main.rs:160–416` —
+  `generate_handler!` is canonical. Cite this handoff for the
+  family-level breakdown in §3.
+- **Slice F (TS frontend).** Uses `equity_price_historical` as the
+  headline typed-wrapper demo (`examples/typescript-frontend/src/main.ts`).
+- **Slice G (CLI).** `tauri-shell-cli` exposes `obb call <route> --param
+  k=v` (`src/bin/cli.rs`), **not** `tauri-shell-cli
+  equity-price-historical`. Generating 255 clap subcommands would bloat
+  the binary for no win — autocomplete only pays off on the TS side.
+  Underlying plumbing (`Proxy::get_with_map` / `Proxy::post`) is the same.
+- **Slice H (connector reference impls).** No interaction; the OpenBB
+  proxy is not pluggable.
 
 ## 10. Known gaps and next steps
 
 ### Gaps
 
-1. **Duplicated `call_get` / `call_post` helpers.** ~32 lines copy-pasted
-   between the two files. Cost: low (helpers are stable), but worth
-   extracting if a third wrapper module appears.
-2. **Lossy POST query coercion.** `call_post`'s query-pair builder converts
-   non-string values to `""` (`obb_routes.rs:42–45`,
-   `obb_routes_extended.rs:48–51`). If a POST route ever takes a numeric
-   query param, it silently sends empty. Fix: `v.to_string()` for
-   `Value::Number` and `Value::Bool`.
-3. **`Result<Value, IpcError>` flattens errors.** All proxy errors map to
-   `IpcError::Internal(string)`. A 404 from the server is
-   indistinguishable from a network timeout on the wire. Should propagate
-   `ProxyError::Http { status, body }` as a structured `IpcError::Http`.
-4. **Naming drift between files.** `quantitative_performance_sharpe`
-   (`obb_routes.rs:723`) vs `quantitative_performance_sortino_ratio`
-   (`obb_routes_extended.rs:1251`). The second file uses the strict
-   mechanical rule. Decide on one; prefer the strict rule.
-5. **No coverage for ~5 metadata/legacy routes.** Acceptable — fallback
-   is `obb_call`. Document the gap in the README.
-6. **No structured params type per route.** By design (§4), but means
-   the TS side carries the typing burden via `openapi-typescript`.
-7. **`generate_handler!` is now 250+ lines just for OpenBB routes.**
-   The macro accepts up to ~1024 entries with no perf impact, so this is
-   only a cosmetic concern. A future cleanup could `#[macro_export]` a
-   helper that takes a list of module names and expands to the entries
-   — but it would obscure the registration site that SPEC §3 explicitly
-   instructs agents not to reorder.
+1. **Duplicated `call_get` / `call_post` helpers** — ~32 LoC copy-pasted
+   across the two files. Stable, but worth extracting if a third
+   wrapper module ever lands.
+2. **Lossy POST query coercion** — `call_post`'s query-pair builder
+   converts non-string values to `""` (`obb_routes.rs:42–45`,
+   `obb_routes_extended.rs:48–51`). Numeric/bool query params on a POST
+   route silently send empty. Fix: `v.to_string()` for `Value::Number`
+   and `Value::Bool`.
+3. **Errors flatten to `IpcError::Internal(string)`** — a 404 is
+   indistinguishable from a network timeout on the wire. Should
+   propagate `ProxyError::Http { status, body }` as `IpcError::Http`.
+4. **Naming drift** — `quantitative_performance_sharpe`
+   (`obb_routes.rs:723`) vs `..._sortino_ratio`
+   (`obb_routes_extended.rs:1251`). The newer file follows the strict
+   mechanical rule; normalize on it.
+5. **A handful of legacy/debug routes uncovered.** Fallback is
+   `obb_call`. Document in README.
+6. **No per-route structured params type.** By design (§4); TS side
+   handles via `openapi-typescript`.
 
 ### Recommended follow-ups (priority order)
 
-1. **(P1) Promote helpers into `src/ipc/obb_call_helpers.rs`.** ~30 LoC
-   diff; eliminates duplication; opens a future hook point for
-   per-route caching, retries, tracing.
-2. **(P1) Fix POST query coercion.** ~5 LoC fix in two places. Add a
-   regression test once Slice D lands.
-3. **(P2) Surface structured proxy errors as `IpcError::Http`.** Touches
-   `src/ipc/mod.rs` (add variant), `proxy.rs` (`From<ProxyError>`),
-   and the two wrapper files. ~50 LoC.
-4. **(P2) Normalize naming.** Rename `quantitative_performance_sharpe`
-   → `quantitative_performance_sharpe_ratio`; update `generate_handler!`,
-   the TS demo, and Slice E's catalog. Compile-error safe.
-5. **(P3) Auto-generate the wrappers.** A `build.rs` script could parse
-   `openapi.json` at build time and `include!()` a generated `.rs`. Has
-   the cost of making the wrapper list invisible to grep — defer.
-6. **(P3) Wire ts-rs to also export a `RouteName` enum** with all 255
-   names as variants. Gives TS a `RouteName` discriminated union for
-   typing `invoke<>()`.
+1. **(P1) Extract helpers into `src/ipc/obb_call_helpers.rs`** — ~30 LoC
+   diff; opens a hook point for per-route caching, retries, tracing.
+2. **(P1) Fix POST query coercion** — ~5 LoC in two places. Regression
+   test under Slice D.
+3. **(P2) Surface structured proxy errors as `IpcError::Http`** — touches
+   `src/ipc/mod.rs`, `proxy.rs`, and both wrapper files. ~50 LoC.
+4. **(P2) Normalize naming** — rename
+   `quantitative_performance_sharpe` → `..._sharpe_ratio`; update
+   `generate_handler!`, the TS demo, the README catalog.
+5. **(P3) Auto-generate wrappers from `openapi.json` via `build.rs`** —
+   hides the list from grep; defer.
+6. **(P3) Export a ts-rs `RouteName` enum** with all 255 variants for
+   typing `invoke<>()` on the TS side.
 
----
-
-End of handoff. Files: `src/ipc/obb_routes.rs` (756 lines),
-`src/ipc/obb_routes_extended.rs` (1487 lines), `src/main.rs` lines
-160–416 (registration), `src/proxy.rs` (HTTP client). All `cargo check`
-and `cargo build --release` clean as of completion.
+Files: `src/ipc/obb_routes.rs` (756 lines),
+`src/ipc/obb_routes_extended.rs` (1487 lines), `src/main.rs:160–416`
+(registration), `src/proxy.rs`. `cargo check` and
+`cargo build --release` clean.
