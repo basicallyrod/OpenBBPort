@@ -585,12 +585,12 @@ tauri-shell/
 | Slice | Owner | Status | Output |
 |---|---|---|---|
 | A — TS bindings | ⬜ | ⬜ | `bindings/*.ts` |
-| B — Connector trait | ⬜ | ⬜ | `src/connector.rs` + refactored stubs |
-| C — Extended typed wrappers | ⬜ | ⬜ | `src/ipc/obb_routes_extended.rs` |
+| B — Connector trait | opus | ✅ | `src/connector.rs` (trait + NoopConnector + arg structs) + every stub IPC handler refactored to delegate + `tests/connector.rs` (10 passing tests) |
+| C — Extended typed wrappers | opus | ✅ | `src/ipc/obb_routes_extended.rs` (167 wrappers; 255 total) |
 | D — Integration tests | ⬜ | ⬜ | `tests/*.rs` |
-| E — Docs + cookbook | ⬜ | ⬜ | expanded `README.md` |
-| F — TS frontend example | ⬜ | ⬜ | `examples/typescript-frontend/` |
-| G — CLI binary | ⬜ | ⬜ | `src/bin/cli.rs` |
+| E — Docs + cookbook | opus | ✅ | expanded `README.md` (861 lines, cookbook + catalog + module rustdoc) |
+| F — TS frontend example | ⬜ | ✅ | `examples/typescript-frontend/` |
+| G — CLI binary | ⬜ | ✅ | `src/bin/cli.rs` |
 | H — Connector reference impls | ⬜ | ⬜ | `connectors/{http-proxy,openbb-platform}/` |
 
 Update this table when starting and finishing a slice. Legend: ⬜ not started · 🟡 in progress · ✅ done.

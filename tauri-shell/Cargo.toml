@@ -45,6 +45,14 @@ thiserror = "1"
 async-trait = "0.1"
 open = "5"
 
+# CLI argument parser for the `tauri-shell-cli` companion binary.
+clap = { version = "4", features = ["derive", "env"] }
+
+# Optional: TypeScript binding generator. Enable with `--features bindings`
+# and run `cargo test --features bindings --test bindings_export` to emit
+# .ts files into ../bindings/.
+ts-rs = { version = "9", features = ["serde-json-impl", "chrono-impl"], optional = true }
+
 # macOS-specific
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -67,10 +75,33 @@ tauri-plugin-updater = "2"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Auto-generate TypeScript bindings for every IPC payload + event + state struct.
+# Drives Slice A from SPEC.md. With this feature on, every annotated struct
+# becomes `ts_rs::TS` and the `bindings_export` test forces export.
+bindings = ["dep:ts-rs"]
+
+[dev-dependencies]
+# Mock HTTP server for proxy.rs integration tests.
+httpmock = "0.7"
+# Scratch dirs for settings + log_storage tests.
+tempfile = "3"
+# Serialize tests that touch global state (LOG_STORAGE, INSTALLATION_PROGRESS,
+# RunningProcesses) so they don't race.
+serial_test = "3"
+# Enables `tauri::test::mock_builder` / `mock_app` so `tests/cleanup.rs` can
+# build an `AppHandle` for the cleanup cascade without booting a real window.
+tauri = { version = "2.10", features = ["test"] }
 
 [[bin]]
 name = "tauri-shell"
 path = "src/main.rs"
+
+# Companion CLI binary. Exercises the same Rust functions that back the
+# Tauri commands, but from a terminal — useful for connector testing,
+# scripting, and CI.
+[[bin]]
+name = "tauri-shell-cli"
+path = "src/bin/cli.rs"
 
 [profile.release]
 opt-level = 3

@@ -17,6 +17,7 @@ pub mod app;
 // Python REST proxy + workspace + typed wrappers
 pub mod obb;
 pub mod obb_routes;
+pub mod obb_routes_extended;
 pub mod openbb_meta;
 pub mod provider;
 // Settings file API
@@ -31,6 +32,8 @@ pub mod routines;
 /// object so the renderer can match on `kind` instead of parsing strings.
 #[derive(Debug, Clone, serde::Serialize, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", tag = "kind", rename_all = "kebab-case"))]
 pub enum IpcError {
     #[error("not implemented: {0}")]
     NotImplemented(String),
@@ -70,6 +73,20 @@ impl From<serde_json::Error> for IpcError {
 impl From<crate::settings::SettingsError> for IpcError {
     fn from(e: crate::settings::SettingsError) -> Self {
         Self::Internal(e.to_string())
+    }
+}
+
+impl From<crate::connector::ConnectorError> for IpcError {
+    fn from(e: crate::connector::ConnectorError) -> Self {
+        use crate::connector::ConnectorError;
+        match e {
+            ConnectorError::NotImplemented(m) => Self::NotImplemented(m.to_string()),
+            ConnectorError::Io(m) => Self::Io(m),
+            ConnectorError::InvalidArgument(m) => Self::InvalidArgument(m),
+            ConnectorError::Unauthorized(m) => Self::Unauthorized(m),
+            ConnectorError::Conflict(m) => Self::Conflict(m),
+            ConnectorError::Internal(m) => Self::Internal(m),
+        }
     }
 }
 

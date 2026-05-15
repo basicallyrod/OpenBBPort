@@ -7,12 +7,17 @@
 //!
 //! Reference: `feature-platform-rest-api.md` (v2 addendum, MCP section).
 
+use std::sync::Arc;
+
 use super::IpcError;
+use crate::connector::Connector;
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct McpSpec {
     pub id: String,
     pub host: String,
@@ -36,6 +41,8 @@ pub struct McpSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct McpStatus {
     pub id: String,
     pub running: bool,
@@ -46,28 +53,45 @@ pub struct McpStatus {
 }
 
 #[tauri::command]
-pub async fn mcp_spawn(_app: AppHandle, _spec: McpSpec) -> Result<McpStatus, IpcError> {
-    Err(IpcError::not_implemented("mcp_spawn"))
+pub async fn mcp_spawn(
+    app: AppHandle,
+    spec: McpSpec,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<McpStatus, IpcError> {
+    connector.mcp_spawn(spec, app).await.map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub async fn mcp_stop(_app: AppHandle, _id: String) -> Result<(), IpcError> {
-    Err(IpcError::not_implemented("mcp_stop"))
+pub async fn mcp_stop(
+    app: AppHandle,
+    id: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<(), IpcError> {
+    connector.mcp_stop(id, app).await.map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub fn mcp_status(_id: String) -> Result<McpStatus, IpcError> {
-    Err(IpcError::not_implemented("mcp_status"))
+pub async fn mcp_status(
+    id: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<McpStatus, IpcError> {
+    connector.mcp_status(id).await.map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub fn mcp_list() -> Result<Vec<McpStatus>, IpcError> {
-    Err(IpcError::not_implemented("mcp_list"))
+pub async fn mcp_list(
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<Vec<McpStatus>, IpcError> {
+    connector.mcp_list().await.map_err(IpcError::from)
 }
 
+/// Once spawned, an MCP server exposes its tool catalog over its protocol.
+/// The connector queries it (e.g. JSON-RPC `tools/list`) and returns the
+/// raw response.
 #[tauri::command]
-pub async fn mcp_list_tools(_id: String) -> Result<serde_json::Value, IpcError> {
-    // Once spawned, an MCP server exposes its tool catalog over its protocol.
-    // Connector should query it (e.g. JSON-RPC `tools/list`) and return.
-    Err(IpcError::not_implemented("mcp_list_tools"))
+pub async fn mcp_list_tools(
+    id: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<serde_json::Value, IpcError> {
+    connector.mcp_list_tools(id).await.map_err(IpcError::from)
 }

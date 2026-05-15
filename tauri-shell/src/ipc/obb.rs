@@ -10,11 +10,13 @@
 
 use super::IpcError;
 use crate::proxy::Proxy;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct ObbCallArgs {
     /// The route, e.g. `/equity/price/historical` (with or without the
     /// `/api/v1` prefix).

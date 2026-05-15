@@ -5,6 +5,7 @@
 
 pub mod autostart;
 pub mod cleanup;
+pub mod connector;
 pub mod events;
 pub mod ipc;
 pub mod path_utils;

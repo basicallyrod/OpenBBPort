@@ -1,7 +1,21 @@
 //! Discovery / introspection commands.
 //!
 //! These help the renderer build dynamic UIs without hard-coding the
-//! Python backend's surface.
+//! Python backend's surface. All three commands read `/openapi.json`
+//! from the configured `crate::proxy::Proxy` and parse it into a
+//! lightweight `RouteInfo` array.
+//!
+//! Use cases:
+//! - Command palette / autocomplete: call `list_all_routes` once at
+//!   boot, cache, and feed a fuzzy search into `search_routes` (or do
+//!   the filtering renderer-side).
+//! - Route-detail panel: `route_parameters` returns the JSON schema for
+//!   one endpoint so the renderer can render a form.
+//!
+//! Related modules:
+//! - `crate::ipc::obb` — the proxy these commands hit.
+//! - `crate::ipc::obb_routes` / `obb_routes_extended` — the typed
+//!   wrappers that `RouteInfo.path` entries point at.
 
 use super::IpcError;
 use crate::proxy::Proxy;
@@ -14,6 +28,8 @@ use tauri::State;
 /// and any tag/category.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct RouteInfo {
     pub path: String,
     pub method: String,
@@ -88,7 +104,9 @@ pub async fn list_all_routes(proxy: State<'_, Proxy>) -> Result<Vec<RouteInfo>, 
 }
 
 /// Free-text search over the route catalog (path + model + summary).
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct RouteSearchArgs {
     pub query: String,
 }
@@ -110,7 +128,9 @@ pub async fn search_routes(
         .collect())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct RouteParamsArgs {
     pub path: String,
     #[serde(default = "default_method")]

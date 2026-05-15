@@ -12,6 +12,8 @@ use tauri::State;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct ProviderSummary {
     pub name: String,
     pub credentials: Vec<String>,
@@ -85,7 +87,9 @@ pub async fn provider_credentials(
 /// Probe a provider's credentials by invoking a known cheap route.
 /// The connector decides which route is "cheap" per provider; for the
 /// generic implementation we let the caller specify.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct ProviderValidateArgs {
     pub provider: String,
     pub probe_route: String,

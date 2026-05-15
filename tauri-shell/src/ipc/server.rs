@@ -10,13 +10,18 @@
 //! - A typed `ServerStatus` for query results
 //! - The `Proxy::set_base_url` call so HTTP requests land on the right server
 
+use std::sync::Arc;
+
 use super::IpcError;
+use crate::connector::Connector;
 use crate::proxy::Proxy;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct ServerSpec {
     pub id: String,
     pub host: String,
@@ -39,6 +44,8 @@ pub struct ServerSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct ServerStatus {
     pub id: String,
     pub running: bool,
@@ -50,38 +57,50 @@ pub struct ServerStatus {
     pub error: Option<String>,
 }
 
+/// Spawn the Python `openbb-api` REST server via the registered
+/// [`Connector`]. The connector typically:
+///   1. Validates the command for dangerous patterns
+///   2. Generates a shell wrapper that activates the env + exports vars
+///   3. Calls `spawn_with_streaming(...)` to register a `backend-<id>` log
+///      channel
+///   4. Inserts the child into [`crate::state::RunningProcesses`]
+///   5. Parses `Started server process [N]` from logs to discover the PID
+///   6. Parses the listen URL from uvicorn's banner (with a debounce)
+///   7. Emits `backend-url-discovered` once the URL is confirmed
+///   8. Calls [`Proxy::set_base_url`] with the discovered URL
 #[tauri::command]
 pub async fn server_spawn(
-    _app: AppHandle,
-    _spec: ServerSpec,
+    app: AppHandle,
+    spec: ServerSpec,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<ServerStatus, IpcError> {
-    // TODO: connect to your backend. Reference flow:
-    //   1. Validate command for dangerous patterns (command_sanitizer)
-    //   2. Generate a shell wrapper that activates the env + exports vars
-    //   3. spawn_with_streaming(...) — registers a "backend-<id>" log channel
-    //   4. Insert into RunningProcesses
-    //   5. Parse `Started server process [N]` from logs → real PID
-    //   6. Parse the listen URL from uvicorn's banner (1500ms debounce)
-    //   7. Emit `backend-url-discovered` when URL is confirmed
-    //   8. Call Proxy::set_base_url with the discovered URL
-    Err(IpcError::not_implemented("server_spawn"))
+    connector.server_spawn(spec, app).await.map_err(IpcError::from)
+}
+
+/// Stop the server by id. The connector runs the full stop dance:
+///   port-based kill → tracked-child kill → PID fallback → state reset.
+#[tauri::command]
+pub async fn server_stop(
+    app: AppHandle,
+    id: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<(), IpcError> {
+    connector.server_stop(id, app).await.map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub async fn server_stop(_app: AppHandle, _id: String) -> Result<(), IpcError> {
-    // TODO: see feature-backend-services.md §5.2 for the full stop dance:
-    //   port-based kill → tracked-child kill → PID fallback → state reset.
-    Err(IpcError::not_implemented("server_stop"))
+pub async fn server_status(
+    id: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<ServerStatus, IpcError> {
+    connector.server_status(id).await.map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub fn server_status(_id: String) -> Result<ServerStatus, IpcError> {
-    Err(IpcError::not_implemented("server_status"))
-}
-
-#[tauri::command]
-pub fn server_list() -> Result<Vec<ServerStatus>, IpcError> {
-    Err(IpcError::not_implemented("server_list"))
+pub async fn server_list(
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<Vec<ServerStatus>, IpcError> {
+    connector.server_list().await.map_err(IpcError::from)
 }
 
 /// Convenience: point the HTTP proxy at a server URL without spawning.

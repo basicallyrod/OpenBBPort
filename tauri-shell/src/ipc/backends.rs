@@ -2,16 +2,26 @@
 //!
 //! Contract: `docs/typescript-port/20-features/feature-backend-services.md`.
 //!
-//! Start/stop must use [`process_spawn::spawn_with_streaming`] for log
-//! streaming and [`state::RunningProcesses`] for tracked-kill support.
+//! Start/stop must use `crate::process_spawn::spawn_with_streaming` for log
+//! streaming and `crate::state::RunningProcesses` for tracked-kill support.
+//! The shell ships one real command here — `open_backend_logs_window` —
+//! which builds a per-backend log window using `windows::open_logs_window`.
+//! Wire the rest of these to your connector (HTTP proxy, sidecar, or pure
+//! Rust). The list of services is connector-owned; the shell does not
+//! persist anything between calls.
+
+use std::sync::Arc;
 
 use super::IpcError;
+use crate::connector::Connector;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct BackendService {
     pub id: String,
     pub name: String,
@@ -40,38 +50,68 @@ pub struct BackendService {
 }
 
 #[tauri::command]
-pub fn list_backend_services() -> Result<Vec<BackendService>, IpcError> {
-    Err(IpcError::not_implemented(
-        "list_backend_services — read your backends.json",
-    ))
+pub async fn list_backend_services(
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<Vec<BackendService>, IpcError> {
+    connector.list_backend_services().await.map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub fn create_backend_service(_backend: BackendService) -> Result<BackendService, IpcError> {
-    Err(IpcError::not_implemented("create_backend_service"))
+pub async fn create_backend_service(
+    backend: BackendService,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<BackendService, IpcError> {
+    connector
+        .create_backend_service(backend)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub fn update_backend_service(_backend: BackendService) -> Result<BackendService, IpcError> {
-    Err(IpcError::not_implemented("update_backend_service"))
+pub async fn update_backend_service(
+    backend: BackendService,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<BackendService, IpcError> {
+    connector
+        .update_backend_service(backend)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub async fn delete_backend_service(_app: AppHandle, _id: String) -> Result<(), IpcError> {
-    Err(IpcError::not_implemented("delete_backend_service"))
+pub async fn delete_backend_service(
+    app: AppHandle,
+    id: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<(), IpcError> {
+    connector
+        .delete_backend_service(id, app)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn start_backend_service(
-    _app: AppHandle,
-    _id: String,
+    app: AppHandle,
+    id: String,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<BackendService, IpcError> {
-    Err(IpcError::not_implemented("start_backend_service"))
+    connector
+        .start_backend_service(id, app)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub async fn stop_backend_service(_app: AppHandle, _id: String) -> Result<(), IpcError> {
-    Err(IpcError::not_implemented("stop_backend_service"))
+pub async fn stop_backend_service(
+    app: AppHandle,
+    id: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<(), IpcError> {
+    connector
+        .stop_backend_service(id, app)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]

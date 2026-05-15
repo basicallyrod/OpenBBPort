@@ -47,6 +47,8 @@ fn resolve(name: &str) -> Result<PathBuf, IpcError> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct RoutineMetadata {
     pub name: String,
     pub modified_unix: u64,
@@ -84,7 +86,9 @@ pub fn routines_list() -> Result<Vec<RoutineMetadata>, IpcError> {
     Ok(out)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct RoutinesReadArgs {
     pub name: String,
 }
@@ -98,7 +102,9 @@ pub fn routines_read(args: RoutinesReadArgs) -> Result<Option<String>, IpcError>
     Ok(Some(std::fs::read_to_string(&path).map_err(IpcError::from)?))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct RoutinesSaveArgs {
     pub name: String,
     pub content: String,
@@ -114,7 +120,9 @@ pub fn routines_save(args: RoutinesSaveArgs) -> Result<bool, IpcError> {
     Ok(true)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct RoutinesDeleteArgs {
     pub name: String,
 }
@@ -130,7 +138,9 @@ pub fn routines_delete(args: RoutinesDeleteArgs) -> Result<bool, IpcError> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct RoutinesRenameArgs {
     pub old_name: String,
     pub new_name: String,

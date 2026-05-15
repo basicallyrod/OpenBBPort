@@ -1,10 +1,31 @@
 //! Misc helper commands. Mostly real; a couple of working-directory
 //! helpers are stubs because they assume your connector's settings shape.
+//!
+//! Topics covered:
+//! - Path discovery (`get_home_directory`, `get_settings_directory`)
+//!   resolved by `crate::path_utils`.
+//! - Native file/directory pickers (`select_directory`, `select_file`)
+//!   delegating to the `tauri-plugin-dialog`.
+//! - Filesystem existence checks (`check_directory_exists`,
+//!   `check_file_exists`) — convenience over `std::fs::metadata` so the
+//!   renderer doesn't need fs capabilities for read-only probes.
+//! - Window helpers (`open_url_in_window`, `open_workspace_in_browser`,
+//!   `open_logs_window`) thin wrappers over `crate::windows`.
+//! - The stubbed `get_working_directory`/`save_working_directory` pair —
+//!   wire these to your settings file once the schema is decided.
+//!
+//! Security note: `open_url_in_window` must NEVER receive a URL that
+//! contains a secret in the query string — window titles can be read by
+//! OS accessibility APIs. See the security section in the crate-level
+//! README.
+
+use std::sync::Arc;
 
 use super::IpcError;
+use crate::connector::Connector;
 use crate::path_utils;
 use crate::windows;
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
 #[tauri::command]
@@ -98,18 +119,28 @@ pub fn open_logs_window(
         .map_err(|e| IpcError::Internal(e.to_string()))
 }
 
-// --- Stubs below depend on the connector's settings schema -----------------
+// --- Connector-backed below: depend on your preferences store --------------
 
+/// Returns the persisted working directory via [`Connector::get_working_directory`].
 #[tauri::command]
-pub fn get_working_directory(_default_dir: Option<String>) -> Result<String, IpcError> {
-    Err(IpcError::not_implemented(
-        "wire to your preferences store",
-    ))
+pub async fn get_working_directory(
+    default_dir: Option<String>,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<String, IpcError> {
+    connector
+        .get_working_directory(default_dir)
+        .await
+        .map_err(IpcError::from)
 }
 
+/// Persists the working directory via [`Connector::save_working_directory`].
 #[tauri::command]
-pub fn save_working_directory(_path: String) -> Result<bool, IpcError> {
-    Err(IpcError::not_implemented(
-        "wire to your preferences store",
-    ))
+pub async fn save_working_directory(
+    path: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<bool, IpcError> {
+    connector
+        .save_working_directory(path)
+        .await
+        .map_err(IpcError::from)
 }

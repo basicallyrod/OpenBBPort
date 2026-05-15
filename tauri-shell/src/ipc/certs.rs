@@ -5,11 +5,17 @@
 //! - the `rcgen` Rust crate (pure Rust)
 //! - the `node-forge` npm package via your TS connector
 
-use super::IpcError;
-use serde::Deserialize;
+use std::sync::Arc;
 
-#[derive(Debug, Deserialize)]
+use super::IpcError;
+use crate::connector::Connector;
+use serde::{Deserialize, Serialize};
+use tauri::State;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct GenerateCertArgs {
     pub common_name: String,
     pub org_name: String,
@@ -21,6 +27,12 @@ pub struct GenerateCertArgs {
 }
 
 #[tauri::command]
-pub fn generate_self_signed_cert(_args: GenerateCertArgs) -> Result<serde_json::Value, IpcError> {
-    Err(IpcError::not_implemented("generate_self_signed_cert"))
+pub async fn generate_self_signed_cert(
+    args: GenerateCertArgs,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<serde_json::Value, IpcError> {
+    connector
+        .generate_self_signed_cert(args)
+        .await
+        .map_err(IpcError::from)
 }

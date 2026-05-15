@@ -17,6 +17,8 @@ use std::sync::{Arc, Mutex};
 pub const DEFAULT_RING_CAPACITY: usize = 10_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct LogEntry {
     /// Milliseconds since epoch.
     pub timestamp: i64,
@@ -238,6 +240,8 @@ impl RunningProcesses {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct InstallationSnapshot {
     pub is_installed: bool,
     pub installation_directory: Option<String>,
@@ -268,6 +272,8 @@ impl InstallationState {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct InstallationProgress {
     pub is_downloading: bool,
     pub is_installing: bool,

@@ -1,15 +1,25 @@
-//! Environment / extension CRUD — all stubs.
+//! Environment / extension CRUD — delegates to the registered [`Connector`].
 //!
 //! Contract: see `docs/typescript-port/20-features/feature-environments.md`
 //! and `feature-extensions.md`. Long-running operations stream output
-//! by emitting `process-output` events with a caller-supplied `processId`.
+//! by emitting `process-output` events with a caller-supplied `processId`
+//! from inside the connector implementation.
+
+use std::sync::Arc;
 
 use super::IpcError;
+use crate::connector::{
+    Connector, CreateEnvironmentArgs, CreateEnvironmentFromRequirementsArgs,
+    ExecuteInEnvironmentArgs, InstallExtensionsArgs, RemoveExtensionArgs, UpdateEnvironmentArgs,
+    UpdateExtensionArgs,
+};
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct CondaEnvironment {
     pub name: String,
     pub python_version: String,
@@ -17,6 +27,8 @@ pub struct CondaEnvironment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct Extension {
     pub package: String,
     pub version: String,
@@ -25,85 +37,158 @@ pub struct Extension {
 }
 
 #[tauri::command]
-pub fn list_conda_environments(_directory: Option<String>) -> Result<Vec<CondaEnvironment>, IpcError> {
-    // TODO: connect to your backend (conda env list, uv toolchain list, etc.).
-    Err(IpcError::not_implemented("list_conda_environments"))
+pub async fn list_conda_environments(
+    directory: Option<String>,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<Vec<CondaEnvironment>, IpcError> {
+    connector
+        .list_conda_environments(directory)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn create_environment(
-    _app: AppHandle,
-    _name: String,
-    _python_version: String,
-    _extensions: Vec<String>,
-    _process_id: String,
+    app: AppHandle,
+    name: String,
+    python_version: String,
+    extensions: Vec<String>,
+    process_id: String,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<bool, IpcError> {
-    Err(IpcError::not_implemented("create_environment"))
+    connector
+        .create_environment(
+            CreateEnvironmentArgs {
+                name,
+                python_version,
+                extensions,
+                process_id,
+            },
+            app,
+        )
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn create_environment_from_requirements(
-    _app: AppHandle,
-    _name: String,
-    _file_path: String,
-    _directory: String,
-    _process_id: String,
+    app: AppHandle,
+    name: String,
+    file_path: String,
+    directory: String,
+    process_id: String,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<bool, IpcError> {
-    Err(IpcError::not_implemented("create_environment_from_requirements"))
+    connector
+        .create_environment_from_requirements(
+            CreateEnvironmentFromRequirementsArgs {
+                name,
+                file_path,
+                directory,
+                process_id,
+            },
+            app,
+        )
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub async fn select_requirements_file() -> Result<String, IpcError> {
-    Err(IpcError::not_implemented(
-        "use ipc::helpers::select_file with an appropriate filter",
-    ))
+pub async fn select_requirements_file(
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<String, IpcError> {
+    connector
+        .select_requirements_file()
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub fn get_environment_extensions(_name: String) -> Result<serde_json::Value, IpcError> {
-    Err(IpcError::not_implemented("get_environment_extensions"))
+pub async fn get_environment_extensions(
+    name: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<serde_json::Value, IpcError> {
+    connector
+        .get_environment_extensions(name)
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn install_extensions(
-    _extensions: Vec<String>,
-    _environment: String,
+    extensions: Vec<String>,
+    environment: String,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<bool, IpcError> {
-    Err(IpcError::not_implemented("install_extensions"))
+    connector
+        .install_extensions(InstallExtensionsArgs {
+            extensions,
+            environment,
+        })
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn update_extension(
-    _package: String,
-    _environment: String,
-    _directory: String,
+    package: String,
+    environment: String,
+    directory: String,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<bool, IpcError> {
-    Err(IpcError::not_implemented("update_extension"))
+    connector
+        .update_extension(UpdateExtensionArgs {
+            package,
+            environment,
+            directory,
+        })
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn update_environment(
-    _environment: String,
-    _directory: String,
+    environment: String,
+    directory: String,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<bool, IpcError> {
-    Err(IpcError::not_implemented("update_environment"))
+    connector
+        .update_environment(UpdateEnvironmentArgs {
+            environment,
+            directory,
+        })
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn remove_extension(
-    _package: String,
-    _environment: String,
-    _directory: String,
+    package: String,
+    environment: String,
+    directory: String,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<bool, IpcError> {
-    Err(IpcError::not_implemented("remove_extension"))
+    connector
+        .remove_extension(RemoveExtensionArgs {
+            package,
+            environment,
+            directory,
+        })
+        .await
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
-pub async fn remove_environment(_name: String) -> Result<bool, IpcError> {
-    Err(IpcError::not_implemented("remove_environment"))
+pub async fn remove_environment(
+    name: String,
+    connector: State<'_, Arc<dyn Connector>>,
+) -> Result<bool, IpcError> {
+    connector.remove_environment(name).await.map_err(IpcError::from)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct ExecResult {
     pub stdout: String,
     pub stderr: String,
@@ -112,9 +197,17 @@ pub struct ExecResult {
 
 #[tauri::command]
 pub async fn execute_in_environment(
-    _command: String,
-    _environment: String,
-    _directory: String,
+    command: String,
+    environment: String,
+    directory: String,
+    connector: State<'_, Arc<dyn Connector>>,
 ) -> Result<ExecResult, IpcError> {
-    Err(IpcError::not_implemented("execute_in_environment"))
+    connector
+        .execute_in_environment(ExecuteInEnvironmentArgs {
+            command,
+            environment,
+            directory,
+        })
+        .await
+        .map_err(IpcError::from)
 }

@@ -42,6 +42,8 @@ pub const NAVIGATE: &str = "navigate";
 /// Payload for [`PROCESS_OUTPUT`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct ProcessOutputEvent {
     pub process_id: String,
     pub output: String,
@@ -84,6 +86,8 @@ impl ProcessOutputEvent {
 /// Payload for [`INSTALL_PROGRESS`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct InstallProgressEvent {
     /// Phase identifier — `"download"`, `"install"`, `"config"`,
     /// `"complete"`, `"error"`, `"abort"`. Connector decides the vocabulary.
@@ -96,6 +100,8 @@ pub struct InstallProgressEvent {
 
 /// Payload for [`BACKEND_URL_DISCOVERED`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct BackendUrlEvent {
     pub id: String,
     pub url: String,
@@ -104,6 +110,8 @@ pub struct BackendUrlEvent {
 /// Payload for [`JUPYTER_STATUS_UPDATE`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/", rename_all = "camelCase"))]
 pub struct JupyterStatusEvent {
     pub environment_name: String,
     pub status: String,
@@ -111,6 +119,8 @@ pub struct JupyterStatusEvent {
 
 /// Payload for [`NAVIGATE`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct NavigateEvent {
     pub path: String,
 }

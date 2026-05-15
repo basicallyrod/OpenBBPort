@@ -36,7 +36,9 @@ pub fn get_user_credentials() -> Result<Value, IpcError> {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct UpdateCredentialsArgs {
     pub credentials: Value,
 }

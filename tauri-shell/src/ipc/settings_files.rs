@@ -10,7 +10,7 @@
 use super::IpcError;
 use crate::path_utils;
 use crate::settings;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -33,7 +33,9 @@ fn resolve(file_name: &str) -> Result<PathBuf, IpcError> {
         .ok_or_else(|| IpcError::Internal("no settings directory".into()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct ReadJsonArgs {
     pub file_name: String,
 }
@@ -44,7 +46,9 @@ pub fn read_settings_json(args: ReadJsonArgs) -> Result<Option<Value>, IpcError>
     Ok(settings::read_json(&path)?)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct WriteJsonArgs {
     pub file_name: String,
     pub content: Value,
@@ -58,7 +62,9 @@ pub fn write_settings_json(args: WriteJsonArgs) -> Result<bool, IpcError> {
     Ok(true)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct ReadTextArgs {
     pub file_name: String,
 }
@@ -73,7 +79,9 @@ pub fn read_settings_text(args: ReadTextArgs) -> Result<Option<String>, IpcError
     Ok(Some(content))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 pub struct WriteTextArgs {
     pub file_name: String,
     pub content: String,

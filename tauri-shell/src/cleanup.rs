@@ -22,7 +22,7 @@
 use crate::state::RunningProcesses;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 pub const OUTER_TIMEOUT: Duration = Duration::from_secs(10);
 pub const HOOK_TIMEOUT: Duration = Duration::from_secs(3);
@@ -30,28 +30,31 @@ pub const KILL_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Trait implemented by the connector so it can register graceful-stop
 /// behaviour for whatever subsystems it owns (Jupyter, backends, MCP, etc.).
+///
+/// The trait object is generic over the Tauri `Runtime` so tests can
+/// register the hook on a `MockRuntime` app handle.
 #[async_trait::async_trait]
-pub trait ShutdownHook: Send + Sync {
+pub trait ShutdownHook<R: Runtime = tauri::Wry>: Send + Sync {
     /// Called inside the cleanup cascade with a bounded 3-second budget.
     /// Must not block beyond that. Failures should be logged, not returned —
     /// the cascade never blocks on hook errors.
-    async fn shutdown(&self, app: AppHandle);
+    async fn shutdown(&self, app: AppHandle<R>);
 }
 
 /// No-op default. The shell registers this if the connector doesn't override.
 pub struct NoopShutdownHook;
 
 #[async_trait::async_trait]
-impl ShutdownHook for NoopShutdownHook {
-    async fn shutdown(&self, _app: AppHandle) {}
+impl<R: Runtime> ShutdownHook<R> for NoopShutdownHook {
+    async fn shutdown(&self, _app: AppHandle<R>) {}
 }
 
 /// Run the full cascade. Returns when complete or when the 10s outer
 /// timeout fires, whichever is sooner.
-pub async fn cleanup_all_processes(app: AppHandle) {
+pub async fn cleanup_all_processes<R: Runtime>(app: AppHandle<R>) {
     let result = tokio::time::timeout(OUTER_TIMEOUT, async {
         // Step 1: connector-provided graceful shutdown.
-        if let Some(hook) = app.try_state::<Arc<dyn ShutdownHook>>() {
+        if let Some(hook) = app.try_state::<Arc<dyn ShutdownHook<R>>>() {
             let hook = Arc::clone(&hook);
             let app2 = app.clone();
             let _ = tokio::time::timeout(HOOK_TIMEOUT, hook.shutdown(app2)).await;
@@ -86,7 +89,7 @@ pub async fn cleanup_all_processes(app: AppHandle) {
 /// Variant for sync contexts (SIGINT handler, Obj-C observer): builds a
 /// fresh runtime to drive the async cascade. Use only where you can't
 /// reach the existing runtime.
-pub fn cleanup_blocking(app: AppHandle) {
+pub fn cleanup_blocking<R: Runtime>(app: AppHandle<R>) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
