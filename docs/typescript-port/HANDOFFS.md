@@ -40,7 +40,7 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 | 4 | API Keys v2 | `api-keys.md` + `platform-rest-api.md` + `installation.md` + `ipc-bridge.md` | ✅ → `api-keys.v2.md` |
 | 5 | Logs v2 | `logs-streaming.md` + `backend-services.md` + `environments.md` + `ipc-bridge.md` | ✅ → `logs-streaming.v2.md` |
 | 6 | App Shell v2 | `app-shell.md` + `installation.md` + `backend-services.md` + `ipc-bridge.md` | ✅ → `app-shell.v2.md` |
-| 7 | IPC Bridge v2 | `ipc-bridge.md` + ALL feature deep-dives | 🟡 |
+| 7 | IPC Bridge v2 | `ipc-bridge.md` + ALL feature deep-dives | ✅ → `ipc-bridge.v2.md` |
 | 8 | Platform REST API v2 | `platform-rest-api.md` + `api-keys.md` + `backend-services.md` + `installation.md` | 🟡 |
 
 ### Wave 2 — Structured feature docs (queued; fires when Wave 1 completes)
