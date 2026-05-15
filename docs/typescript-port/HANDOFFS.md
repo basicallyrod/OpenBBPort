@@ -71,8 +71,8 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 | `30-port/port-strategy.md` | `platform-rest-api.md` + all feature docs | ⬜ |
 | `30-port/port-tech-stack.md` | `ipc-bridge.md` + `app-shell.md` | ✅ |
 | `30-port/port-invoke-mapping.md` | every feature doc's translation table | ✅ |
-| `30-port/port-roadmap.md` | all | ⬜ |
-| `30-port/port-design-process.md` | all | ⬜ |
+| `30-port/port-roadmap.md` | all | ✅ |
+| `30-port/port-design-process.md` | all | ✅ |
 | `00-overview.md` | all | ⬜ |
 
 ## Feature template (Wave 2 writers MUST follow)

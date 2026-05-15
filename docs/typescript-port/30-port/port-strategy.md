@@ -45,24 +45,13 @@ without touching the Hard bucket.
 ### Layer 1: Desktop UI (Tauri + React + Rust)
 
 **Current state.** Tauri 2.x app. Renderer is React + TS (`desktop/src/**`).
-Backend is Rust:
-
-| File | LOC | Role |
-|---|---|---|
-| `desktop/src-tauri/src/main.rs` | 858 | App bootstrap, tray, autostart, command registration |
-| `desktop/src-tauri/src/tauri_handlers/startup.rs` | 1,883 | Install wizard, conda bootstrap, default seed |
-| `desktop/src-tauri/src/tauri_handlers/environments.rs` | 3,888 | Conda env CRUD, smart retry, requirements parse |
-| `desktop/src-tauri/src/tauri_handlers/backends.rs` | 2,000 | Backend services lifecycle, log scrape, URL discovery |
-| `desktop/src-tauri/src/tauri_handlers/helpers.rs` | 2,806 | Conda spawn, atomic writes, file pickers |
-| `desktop/src-tauri/src/tauri_handlers/jupyter.rs` | 743 | Jupyter Lab launch |
-| `desktop/src-tauri/src/tauri_handlers/credentials.rs` | 533 | `user_settings.json` read/write, allow-listed editor open |
-| `desktop/src-tauri/src/utils/process_monitor.rs` | 740 | Log buffer, ANSI strip, throttling |
-| `desktop/src-tauri/src/utils/certs.rs` | 562 | Self-signed certs, trust-store install |
-| `desktop/src-tauri/src/uninstall.rs` | 835 | Two-phase uninstall + helper executable |
-| Other | ~1,500 | autostart, command sanitizer, app termination |
-| **Total Rust** | **~16,400 LOC** | |
-
-(Numbers verified via `find desktop/src-tauri -name '*.rs' | xargs wc -l`.)
+Backend is Rust — **~16,400 LOC** verified, distributed across:
+`main.rs` (858, bootstrap/tray/autostart), `startup.rs` (1,883, install wizard),
+`environments.rs` (3,888, conda CRUD), `backends.rs` (2,000, service lifecycle),
+`helpers.rs` (2,806, conda spawn + file pickers + atomic writes),
+`jupyter.rs` (743), `credentials.rs` (533), `process_monitor.rs` (740),
+`certs.rs` (562), `uninstall.rs` (835, separate executable),
+and ~1,500 LOC of autostart/sanitizer/termination glue.
 
 > ⚠️ CONSTRAINT: The renderer is already TypeScript. "Port the desktop UI" only
 > means: the **backend** (Rust → Node/TS) and the **shell** (Tauri 2.x → Electron
@@ -94,26 +83,15 @@ Backend is Rust:
 
 #### Recommendation
 
-**B for v1. Migrate to A later if/when a non-desktop deployment (browser, hosted
-agent, headless server) becomes a real product.**
+**B for v1.** Migrate to A later if/when a non-desktop deployment (browser,
+hosted agent, headless server) becomes a real product. The Rust backend
+already works; A would consume 4-6 person-months re-discovering the same
+documented bugs (atomic writes, port-kill filters, race conditions).
 
-Rationale: the Rust backend already works. The 16k LOC is **distributed across 11
-files**, and every feature doc has documented its bugs and port-fixes. A pure-A
-desktop port would consume 4-6 person-months and produce a less-stable v1
-because the same bugs (atomic writes, race-conditions, port-kill filters)
-must be re-discovered.
-
-The strong argument for A is **future code-reuse with a server deployment**: if
-the same Node code runs as Electron main AND as a hosted-server agent, the
-ROI flips. But that's a Wave 4+ question. The roadmap should plan A as a
-post-v1 milestone, not block v1 on it.
-
-> ⚠️ CONSTRAINT: Rust binary `uninstall.rs:835` is a **separate executable** that
-> outlives the main app (used during the two-phase uninstall to delete the install
-> dir). Strategy A loses this — Node has no equivalent of a `.exe` that lives outside
-> the Electron bundle and self-deletes its own parent dir. The current Rust pattern
-> writes a small helper binary, spawns it, and quits. Replicate with a small Go or
-> Rust shim, or accept "uninstall leaves a stub" (the macOS pattern).
+> ⚠️ CONSTRAINT: `uninstall.rs` is a **separate executable** that outlives the
+> main app (two-phase uninstall, deletes install dir). Strategy A loses this —
+> Node has no equivalent. Replicate with a small Go/Rust shim, or accept
+> "uninstall leaves a stub" (the macOS pattern).
 
 ---
 
