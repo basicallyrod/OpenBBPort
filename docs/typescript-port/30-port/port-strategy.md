@@ -161,33 +161,20 @@ install (`platform-rest-api.v2.md:G.1`). Default port 6900.
 
 #### Recommendation
 
-**B for v1. Strategy A is a multi-quarter follow-up for the Easy bucket only;
-even then, the Python server must remain available for the Hard bucket
-and the data-processing extensions.**
+**B for v1.** Strategy A is a multi-quarter follow-up for the Easy bucket
+only; even then, the Python server must remain available for the Hard
+bucket and data-processing extensions. Every claimed A advantage (smaller
+install, fast boot, single language) is undone by **half the providers
+falling back to Python anyway**. Two sidecars is worse than one.
 
-Rationale: every claimed advantage of A (smaller install, fast boot, single
-language) is undone by the fact that **half the providers will fall back to
-Python anyway**. Two sidecars (TS server for Easy providers, Python server for
-Hard providers + charting + econometrics) is worse than one Python server.
+Revisit A when: (1) a no-Python distribution becomes a real product
+(browser, embedded); (2) cold-start UX mitigations are exhausted; (3) the
+Easy bucket is upstream-frozen.
 
-The right time to revisit A is when:
-
-1. A specific subset of providers (e.g. just FMP + Polygon + FRED) needs to ship
-   in a no-Python-runtime distribution (browser, embedded, etc.).
-2. The cold-start time becomes a critical UX problem and the easy mitigations
-   (warm-keep on tray, lazy provider import) are exhausted.
-3. The Easy bucket has been frozen by upstream (no new providers) so re-port
-   maintenance is bounded.
-
-Until then, the 8-15 s cold start is a real problem with realistic mitigations:
-
-- Start `openbb-api` on app launch, **before** the renderer needs it (tray-and-autostart already does this).
-- Show a deterministic "Loading providers…" progress UI tied to the stdout
-  scan, not just a spinner (the current `feature-backend-services.md` log-scan
-  already extracts the bound URL — extend it to extract `RegistryMap built`
-  / `widgets.json built` / `ready` markers).
-- Cache `widgets.json` between runs (the Python server rebuilds at every boot;
-  desktop can short-circuit if the provider set hasn't changed).
+Cold-start mitigations for v1:
+- Spawn `openbb-api` at app launch (tray autostart already does this).
+- Deterministic "Loading providers…" UI tied to stdout markers, not a generic spinner.
+- Cache `widgets.json` between runs; short-circuit when provider set is unchanged.
 
 ---
 
@@ -233,26 +220,16 @@ spawns it via `execute_in_environment` in a native terminal
 
 #### Recommendation
 
-**C for v1. Consider Strategy B in Wave 4+ only if a non-desktop CLI is needed
-(e.g. a "serverless" `npx openbb` for headless CI use).**
+**C for v1.** Consider Strategy B in Wave 4+ only if a non-desktop CLI is
+needed (e.g. `npx openbb` for headless CI). The desktop UI already covers
+extension management, API keys, env activation, and chart rendering. The
+CLI's unique value reduces to:
+1. `.openbb` routines (record/replay) — better as a desktop "Run Routine" feature.
+2. Scripting — users who script write Python; a TS REPL adds nothing.
+3. Power-user terminal — `execute_in_environment` already spawns the existing Python `openbb` in a native terminal.
 
-Rationale: the desktop UI already covers extension management, API keys, env
-activation, and chart rendering — **all the CLI's UI-shaped affordances**. The
-unique CLI value is:
-
-1. **`.openbb` routines (record/replay).** Better implemented as a desktop
-   feature ("Run Routine" button that replays REST calls). This moves a
-   power-user feature into the GUI surface, where it gains observability and
-   UI for parameter overrides.
-2. **Scripting / pipelines.** Users who script already write Python; a TS REPL
-   gives them nothing they don't have.
-3. **Power-user terminal flow.** The desktop's `execute_in_environment` already
-   spawns the **existing Python** `openbb` in a native terminal. This works
-   today and costs the port nothing.
-
-The risk in skipping: a small subset of users uses the CLI as their primary
-interface. The mitigation: the Python CLI continues to work; we just don't
-re-implement it in TS. The desktop binary is the unified front door.
+Risk: a small user-base prefers the CLI as primary interface. Mitigation:
+the Python CLI keeps working; we just don't re-implement.
 
 ---
 
@@ -296,36 +273,27 @@ spec (`feature-platform-rest-api.md:Workspace integration`,
 
 #### Recommendation
 
-**A — but pragmatically a "TS emits, generated from Python's OpenAPI at install time" hybrid.**
+**A hybrid: TS emits, generated from Python's OpenAPI captured at install/extension-change time.**
 
-Concretely:
+Flow:
+1. After install (`pip install openbb-platform-api` + extensions), the
+   desktop spawns `openbb-api` once, captures `/openapi.json` and
+   `/widgets.json`, and stores them with the env metadata.
+2. TS layer serves `/widgets.json` and `/apps.json` from this cache,
+   layering user overrides from `widget_settings.json` and
+   `workspace_apps.json`.
+3. Regenerate cache on extension install/upgrade/remove.
+4. Fix documented bugs at this seam: silent app drop → warn; auto-create-on-GET
+   → do at install time; `merge_agents.py:49` `startwith` typo → corrected.
 
-1. At install (after `pip install openbb-platform-api` plus selected extensions),
-   the desktop **once** starts `openbb-api`, captures `/openapi.json` and
-   `/widgets.json`, and stores them next to the env metadata.
-2. The TS layer serves `/widgets.json` and `/apps.json` from this captured
-   data, applying user overrides (from
-   `~/.openbb_platform/widget_settings.json` and
-   `~/OpenBBUserData/workspace_apps.json`).
-3. When extensions change (install / upgrade / remove), the TS layer
-   regenerates the cache from Python.
-4. The TS layer fixes the documented bugs at this boundary: silent app drop on
-   missing widget → emit warnings, auto-create-on-GET → do at install time
-   instead, `merge_agents.py:49` typo → corrected port.
+Not strict A (runtime TS impl of `build_json`): the ~500 LOC of OpenAPI
+walking + parameter munging at `utils/widgets.py:233-741` has subtle
+contracts (`TO_CAPS_STRINGS`, the provider-pretty-name map at
+`widgets.py:559-575`, `multiple_items_allowed`) that re-port poorly. Hybrid
+avoids reimplementing the algorithm while still owning the endpoint.
 
-Why not strict A (run-time TS implementation): the
-`build_json(openapi, widget_exclude_filter)` algorithm at
-`utils/widgets.py:233-741` is ~500 LOC of OpenAPI walking + parameter munging.
-Porting it line-by-line is feasible but risky and gates v1 on subtleties (the
-`TO_CAPS_STRINGS` list at `openapi.py:8-63`, the
-provider-pretty-name map at `widgets.py:559-575`, the `multiple_items_allowed`
-flag, etc.). The hybrid avoids reimplementing the algorithm while still
-owning the endpoint and being able to fix its bugs at the seam.
-
-Why not B (pure proxy): `/widgets.json` is the contract surface for OpenBB
-Workspace. If we ever want to ship a TS-only deployment (no Python), or to
-support multiple language backends behind one Workspace, we must own this
-endpoint. A also lets us fix the silent-drop and side-effect-on-GET bugs.
+Not B (pure proxy): `/widgets.json` is the Workspace contract surface; we
+must own it for future TS-only deployment and for bug fixes.
 
 ---
 
@@ -365,22 +333,14 @@ documented so a future wave can revisit without re-litigating.
 
 ### Where the "TS" in "TS port" actually lives
 
-Under this strategy, the TS code that gets written is:
+Under this strategy the v1 TS work is:
 
-1. **L4 Workspace emitter** — `/widgets.json`, `/apps.json`, `/agents.json`
-   served by a small Hono/Express app embedded in the desktop (or hosted as
-   a Node sidecar if Strategy L1-A is later chosen).
-2. **OBBject client codegen** — `openapi-typescript` against the captured
-   `/openapi.json` at build time, producing TS types the renderer imports
-   when it does `fetch('/api/v1/...')`. No runtime cost; pure DX.
-3. **Renderer cleanup** — typed phase enum for installation
-   (`feature-installation.md:Open questions` and bugs list), structured
-   WS frames replacing `window.event`, chosen-port reporting, etc. ~500 LOC.
-4. **L4-side bug fixes** — silent-drop warning, mtime-based settings reload
-   replacing per-request disk reads (if we ever move credentials proxying
-   into the TS layer), etc.
+1. **L4 Workspace emitter** — `/widgets.json`, `/apps.json`, `/agents.json` served by a small Hono/Express app embedded in the desktop.
+2. **OBBject client codegen** — `openapi-typescript` against the captured `/openapi.json` at build time. Pure DX, no runtime cost.
+3. **Renderer cleanup** — typed phase enum, structured WS frames replacing window events, chosen-port reporting (~500 LOC).
+4. **L4-side bug fixes** — silent-drop warnings, mtime-based settings reload at the proxy seam.
 
-This is the v1 contour. Layers 1 and 2 stay native (Rust + Python).
+Layers 1 and 2 stay native (Rust + Python).
 
 ---
 
@@ -403,11 +363,9 @@ deep-dives.
 | **`ProviderInterface` + `RegistryMap`** (~700 LOC of Python metaclass-driven dataclass generation) | `platform-rest-api.md:1e`, `provider_interface.py:543-697` | 2-3 weeks to design TS-build-time equivalent (Zod codegen from a manifest). Much smaller than Python because the codegen runs once at build, not at every server boot. |
 | **`openbb-econometrics`, `-quantitative`, `-technical`** | `feature-platform-rest-api.md:387` | **Blocked.** Numpy/scipy/statsmodels deep dependence. Either keep Python sidecar for these routes or drop. |
 
-**Total Strategy A cost (Easy bucket only, no Hard providers, no
-data-processing extensions): ~9-12 person-months.** And the result is a
-PARTIAL port — Python still required for the Hard bucket and the
-data-processing extensions. The realistic value/cost ratio tips Strategy A
-into "not yet" territory.
+**Total Strategy A cost (Easy bucket only): ~9-12 person-months — and the
+result is a PARTIAL port.** Python still required for the Hard bucket and
+data-processing extensions. Value/cost ratio tips A into "not yet."
 
 ---
 
@@ -436,34 +394,12 @@ list is sourced from `feature-platform-rest-api.md` and
 ## Migration path
 
 Strategy B → Strategy A is **layer-by-layer feasible** because the architecture
-is HTTP-fronted at every seam.
-
-```
-Today (Python):                After v1 (TS port, mixed):           Hypothetical Wave 4+ (TS-heavy):
-
-┌─────────────────────────┐    ┌─────────────────────────┐          ┌─────────────────────────┐
-│ Renderer (TS, React)    │    │ Renderer (TS, React)    │          │ Renderer (TS, React)    │
-└───────────┬─────────────┘    └───────────┬─────────────┘          └───────────┬─────────────┘
-            │ Tauri invoke                 │ Tauri invoke                       │ Tauri invoke (or web)
-            ▼                              ▼                                    ▼
-┌─────────────────────────┐    ┌─────────────────────────┐          ┌─────────────────────────┐
-│ Rust backend            │    │ Rust backend            │          │ Node backend (Electron) │
-│  - conda                │    │  - conda                │          │  - conda                │
-│  - process lifecycle    │    │  - process lifecycle    │          │  - process lifecycle    │
-│  - user_settings.json   │    │  - user_settings.json   │ ◄── L1-A │  - user_settings.json   │
-└───────────┬─────────────┘    │  - widgets.json (TS!) ◄─┼──── L4-A │  - widgets.json (TS)    │
-            │                  └───────────┬─────────────┘          │  - openapi proxy        │
-            │ subprocess + HTTP            │ subprocess + HTTP      └───────────┬─────────────┘
-            ▼                              ▼                                    │
-┌─────────────────────────┐    ┌─────────────────────────┐                      ▼
-│ Python openbb-api       │    │ Python openbb-api       │ ◄── L2-A  ┌─────────────────────────┐
-│ Python openbb-mcp       │    │ Python openbb-mcp       │ partial   │ TS providers (Easy bucket)│
-└─────────────────────────┘    └─────────────────────────┘           ├─────────────────────────┤
-                                                                     │ Python sidecar           │
-                                                                     │ (Hard bucket +           │
-                                                                     │  econometrics, charting) │
-                                                                     └─────────────────────────┘
-```
+is HTTP-fronted at every seam. Today: Renderer (TS) → Rust backend → Python
+(openbb-api + openbb-mcp). After v1 (mixed): same shape plus TS-owned
+`/widgets.json` emitter. Wave 4+: Rust backend can become Node main (L1-A),
+Python REST server can be partially replaced by TS providers for the Easy
+bucket while keeping Python sidecar for Hard bucket + econometrics/charting
+(L2-A partial).
 
 Dependencies between migrations:
 
