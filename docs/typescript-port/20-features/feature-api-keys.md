@@ -102,16 +102,15 @@ are renderer-only — they never cross the IPC boundary.
 
 ## State surfaces
 
-- **React state** (`api-keys.tsx:22-39`): `apiKeys: ApiKey[]`, `searchQuery`,
+- **React state** (`api-keys.tsx:22-39`): `apiKeys`, `searchQuery`,
   `isAddKeyModalOpen`, `editingKeyIndex`, `modalMode`, `newKey`,
-  `isModalValueVisible`, `modalCopied`, `visibleKeys: Set<string>`,
-  `copiedKey`, `error`, `loading`, plus import-modal state
-  (`importedKeys`, `selectedKeys`, `importVisibleKeys`).
+  `isModalValueVisible`, `modalCopied`, `visibleKeys`, `copiedKey`, `error`,
+  `loading`, plus import-modal state (`importedKeys`, `selectedKeys`,
+  `importVisibleKeys`).
 - **Rust state**: none. Every invoke is a fresh read-or-write.
-- **Disk files**: `~/.openbb_platform/user_settings.json` (R/W);
-  `system_settings.json` (R only, for `installation_directory`);
-  `mcp_settings.json`, `.env`, `<installation_dir>/conda/.condarc` (open in
-  editor only).
+- **Disk**: `~/.openbb_platform/user_settings.json` (R/W);
+  `system_settings.json` (R, for `installation_directory`);
+  `mcp_settings.json`, `.env`, `<installation_dir>/conda/.condarc` (editor only).
 
 ## Persistence
 
@@ -141,23 +140,18 @@ are renderer-only — they never cross the IPC boundary.
 }
 ```
 
-The api-keys page mutates **only** the `credentials` subtree. The Rust
-handler reads-modify-writes so `preferences`, `defaults`, and `id` are
-preserved. Multiple features share this file:
+The api-keys page mutates only the `credentials` subtree. The Rust handler
+reads-modify-writes so `preferences`, `defaults`, and `id` are preserved.
 [`feature-installation.md`](./feature-installation.md) writes the initial
-`{"credentials": {}}` at install time; theme-toggle mutates
-`preferences.chart_style` with an exclusive flock (`helpers.rs:177-286` —
-contrast with this feature, which takes no lock).
+`{"credentials": {}}` at install time; theme-toggle mutates `preferences`
+with an exclusive flock (`helpers.rs:177-286`) — this feature takes no lock.
 
-Disk casing is preserved by both Rust and the desktop UI; case
-normalization happens only inside Python's `_normalize_credential_map`
-(`credentials.py:44-58`). The disk can therefore contain `POLYGON_API_KEY`
-and `polygon_api_key` simultaneously, which Python silently merges at
-runtime (api-keys.v2.md §1e).
-
-`null` vs `""` round-trip asymmetry: load maps `null → ""`, save writes
-`""` back instead of `null`. Each save erases all on-disk nulls
-(api-keys.v2.md §18).
+Disk casing is preserved end-to-end; lowercasing only happens inside
+Python's `_normalize_credential_map` (`credentials.py:44-58`). The disk can
+contain `POLYGON_API_KEY` and `polygon_api_key` simultaneously, which Python
+silently merges (api-keys.v2.md §1e). `null` vs `""` round-trip asymmetry:
+load maps `null → ""`, save writes `""` instead of `null`, so each save
+erases all on-disk nulls (api-keys.v2.md §18).
 
 ## Error handling
 

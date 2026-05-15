@@ -160,22 +160,17 @@ Conda" checkbox is hard-locked on).
   or recovery — the user is stuck on a half-spinning dialog.
 
 ## ▸ Interfaces with
-- **depends-on** `feature-tray-and-autostart.md` for the entry point (tray
-  `Uninstall` item at `main.rs:668-679`) and for **step 2** of the cascade
-  (`disable_autostart` per-OS).
-- **depends-on** `feature-backend-services.md` for **step 1**
-  (`stop_all_backend_services` + `stop_all_jupyter_servers`) — uninstall is one
-  of three call-sites that gracefully stops services.
-- **depends-on** `feature-environments.md` for **step 4** — conda env enumeration
-  and removal use the same `<install>/conda/envs/*` layout the environments
-  feature creates.
+- **depends-on** `feature-tray-and-autostart.md` — tray `Uninstall` item is the
+  only entry (`main.rs:668-679`); cascade **step 2** calls `disable_autostart`.
+- **depends-on** `feature-backend-services.md` — **step 1** runs
+  `stop_all_backend_services` + `stop_all_jupyter_servers`.
+- **depends-on** `feature-environments.md` — **step 4** walks
+  `<install>/conda/envs/*`.
 - **inverse-of** `feature-installation.md` — every artifact installation
-  creates (`~/.openbb_platform/`, conda envs, `system_settings.json`,
-  `install_settings.installation_directory`) has a deletion step here. The
-  port should keep these two features paired so additions on one side get
-  matching teardown on the other.
-- **shares-state-with** all features via the cleanup of `~/.openbb_platform/`
-  and shutdown of every spawned process.
+  creates has a matching deletion step here; keep the two features paired so
+  additions on one side get teardown on the other.
+- **shares-state-with** all features via `~/.openbb_platform/` removal and
+  child-process shutdown.
 
 ## TS port mapping
 | Tauri call | TS equivalent | Notes |
@@ -195,41 +190,32 @@ Conda" checkbox is hard-locked on).
 
 ## Known bugs and port-time fixes
 
-> ⚠️ **`invoke('app.exit')` typo (`uninstall.tsx:84`).** No matching Rust
-> handler. Silent failure on Linux (app keeps running after uninstall) and
-> Windows (masked only because the `.bat` runs `taskkill`). Works on macOS
-> only because `uninstall.rs:399` `std::process::exit(0)` runs first inside
-> the handler. **Port fix:** rename to `quit_application` and unify the exit
-> path across all three OSes; do not rely on a side-effect of the Rust process
-> dying mid-IPC.
+> ⚠️ **`invoke('app.exit')` typo (`uninstall.tsx:84`).** No matching Rust handler.
+> Silent failure on Linux (app keeps running) and Windows (masked only because
+> the `.bat` runs `taskkill`). Works on macOS only because `uninstall.rs:399`
+> `std::process::exit(0)` runs first. **Fix:** rename to `quit_application` and
+> unify the exit path across all three OSes.
 
-> ⚠️ **Defensive cleanup of artifacts that current code never creates.** macOS
-> `~/Library/LaunchAgents/com.openbb.platform.plist`, Windows registry
-> `Run`/`RunOnce` keys (4 paths × 5 entry names = 20 combinations), and Linux
-> `~/.config/systemd/user/openbb-platform.service` are all swept by
-> `remove_system_integrations` (`uninstall.rs:642-725`) but **never written by
-> current autostart code** (which uses AppleScript login items, `.lnk` in
-> Startup folder, and XDG `.desktop` file respectively — see
-> `feature-tray-and-autostart.md`). **Port decision:** keep these as legacy-detect
-> sweeps if shipping as an upgrade for existing users; otherwise drop them.
+> ⚠️ **Defensive cleanup of never-created artifacts.** macOS LaunchAgents plist,
+> Windows registry `Run`/`RunOnce` keys (4×5=20 combos), and Linux
+> systemd-user service are all swept by `remove_system_integrations`
+> (`uninstall.rs:642-725`) but **never written by current autostart code**
+> (AppleScript / `.lnk` / XDG `.desktop` — see `feature-tray-and-autostart.md`).
+> **Decision:** keep as legacy-detect for upgraders, else drop.
 
-> ⚠️ **Windows `.bat` opens a visible console window** (`uninstall.rs:815-824`,
-> comment says "Do NOT hide this window"). The user can dismiss it mid-uninstall
-> by clicking X; this skips only the final `pause` — all destructive operations
-> already completed. **Port decision:** either keep visible (current intent) or
-> hide it (`windowsHide: true` on `spawn`) and replace the `pause` with a
-> notification.
+> ⚠️ **Windows `.bat` opens a visible console window** (`uninstall.rs:815-824`).
+> User can dismiss mid-uninstall by clicking X — all destructive operations
+> already ran before the `pause`, so only the "Press any key" confirmation is
+> skipped. **Decision:** keep visible, or hide (`windowsHide: true`) + replace
+> `pause` with a notification.
 
-> ⚠️ **No rollback if any step fails.** The cascade is fail-fast and leaves
-> the disk in whatever state the failing step produced. **Port fix:** either
-> wrap each step in a recovery transaction with a journal of completed steps,
-> or accept the same semantics and surface a clearer "Uninstall incomplete"
-> error.
+> ⚠️ **No rollback if any step fails.** Fail-fast leaves disk in whatever state
+> the failing step produced. **Fix:** journal completed steps + recovery, or
+> surface a clearer "Uninstall incomplete" error.
 
-> ⚠️ **Step 1 has no timeout** when calling `stop_all_*_services`. A wedged
-> child process blocks the whole flow. **Port fix:** add a 3-5 s timeout
-> matching the shutdown cascade in `feature-tray-and-autostart.md`, then fall
-> through to `taskkill`/`pkill` regardless.
+> ⚠️ **Step 1 has no timeout** on `stop_all_*_services`. A wedged child blocks
+> the whole flow. **Fix:** add 3-5 s timeouts matching the shutdown cascade in
+> `feature-tray-and-autostart.md`, then fall through to `taskkill`/`pkill`.
 
 ## Open questions
 - **Dry-run mode?** Preview live conda env names, target paths, and disk size
@@ -257,9 +243,7 @@ Conda" checkbox is hard-locked on).
 ---
 
 ### Sources
-- `desktop/src-tauri/src/uninstall.rs` (lines 14-403 = main handler; 296-400
-  = macOS post-mortem; 642-725 = system integrations; 730-835 = Windows .bat).
-- `desktop/src/routes/uninstall.tsx` (lines 11-96).
-- `desktop/src-tauri/src/main.rs:668-679` (tray entry point).
-- `docs/typescript-port/raw-deep-dives/app-shell.md` §8.
-- `docs/typescript-port/raw-deep-dives/app-shell.v2.md` §11, §12.
+- `desktop/src-tauri/src/uninstall.rs` (14-403 main; 296-400 macOS; 642-725 integrations; 730-835 .bat)
+- `desktop/src/routes/uninstall.tsx:11-96`
+- `desktop/src-tauri/src/main.rs:668-679` (tray entry)
+- `raw-deep-dives/app-shell.md` §8; `app-shell.v2.md` §11, §12.

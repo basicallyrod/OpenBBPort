@@ -37,11 +37,10 @@ env-on-disk, and the per-env `<env>.yaml` manifest used by later operations.
 | Surface | File:line | Notes |
 |---|---|---|
 | Add Extension modal (existing env) | `components/AddExtensionSelector.tsx` | Loaded from `environments.tsx:2576-2581` |
-| Extension selector (wizard) | `components/InstallComponents.tsx::ExtensionSelector` | Loaded from create-env modal step 3 |
+| Extension selector (wizard) | `components/InstallComponents.tsx::ExtensionSelector` | Step 3 of create-env modal |
 | Tabs | `conda`, `extras`, `provider`, `router`, `other-openbb` | First two free-text; rest checklists |
 | Conda channel field | `AddExtensionSelector.tsx:203-213` | Builds `${channel}:${pkg}` |
-| Extension row | `components/ExtensionRow.tsx` (used at `environments.tsx:213-227`) | Trash + refresh icons |
-| Install button state | `installExtensionsLoading` (`environments.tsx:282`) | Disables button only |
+| Extension row | `components/ExtensionRow.tsx` (`environments.tsx:213-227`) | Trash + refresh icons |
 | Error banners | `extensionsError`, `extensionRemoveError`, `updateExtensionError` (`environments.tsx:2617-2682`) | Inline in panel |
 
 ### The catalog (frontend-only, no Tauri, no caching)
@@ -134,14 +133,13 @@ the prefix, and the parser strips it for the actual `conda remove` call.
 
 - **React state** (in `environments.tsx`): `extensions`, `environmentPackages`,
   `installExtensionsLoading`, `updatingExtension`, `removingExtension`,
-  `extensionSelectorKey` (incremented to remount the selector after install).
+  `extensionSelectorKey` (forces selector remount after install).
 - **Rust state**: none. Handlers are stateless; every call re-reads disk.
-- **Disk files**:
-  - `~/.openbb_platform/system_settings.json` — read for installation dir.
-  - `~/.openbb_platform/environments/<env>.yaml` — read, mutated, rewritten.
-  - `<install>/conda/envs/<env>/...` — modified via bundled conda binary.
-  - `localStorage["env-extensions-cache"]` — frontend mirror;
-    `{[env]: {extensions, pythonVersion}}` (no TTL; owned by `feature-environments.md`).
+- **Disk files**: `~/.openbb_platform/system_settings.json` (install dir);
+  `~/.openbb_platform/environments/<env>.yaml` (mutated);
+  `<install>/conda/envs/<env>/...` (modified via conda).
+- **localStorage**: `env-extensions-cache` — frontend mirror,
+  `{[env]: {extensions, pythonVersion}}`, no TTL (owned by `feature-environments.md`).
 
 ## Persistence — the `<env>.yaml` rewrite
 
@@ -219,20 +217,18 @@ Cancel is modal-hide only; no abort signal reaches the backend.
 
 ## ▸ Interfaces with
 
-- **depends-on** `feature-environments.md` — env must exist (`install_extensions`
-  errors with `"Environment '{env}' does not exist"` if
-  `<install>/conda/envs/<env>/bin/python` is missing). Env page owns the
-  `env-extensions-cache` localStorage schema and the `<env>.yaml` location.
-- **depends-on** `feature-installation.md` — Step 3 of the wizard IS this
-  feature, just called from `InstallComponents.tsx` instead of
-  `AddExtensionSelector.tsx`. The wizard also runs the explicit
-  `execute_in_environment("openbb-build")` (footgun above).
+- **depends-on** `feature-environments.md` — env must exist on disk; env page
+  owns the `<env>.yaml` location and the `env-extensions-cache` localStorage
+  schema.
+- **depends-on** `feature-installation.md` — wizard Step 3 IS this feature,
+  called from `InstallComponents.tsx` instead of `AddExtensionSelector.tsx`.
+  Wizard also runs an explicit `execute_in_environment("openbb-build")` after
+  (footgun above).
 - **depended-on-by** `feature-platform-rest-api.md` — installed packages are
   what the REST server imports at boot.
 - **depended-on-by** `feature-jupyter.md` — presence of `notebook`/`jupyter`/
   `jupyterlab` enables the "Open in Jupyter" button.
-- **shares-state-with** `feature-environments.md` via
-  `~/.openbb_platform/environments/<env>.yaml` and via
+- **shares-state-with** `feature-environments.md` via `<env>.yaml` and
   `localStorage["env-extensions-cache"]`.
 
 ## TS port mapping
@@ -267,21 +263,16 @@ function parseExtensionString(s: string): ExtensionSpec {
 
 ### Shell-out reproduction
 
-Every spawn must use the conda env-var preamble (`CONDA_ROOT`, `CONDA_ENVS_PATH`,
-`CONDA_PKGS_DIRS`, `CONDARC` set; `CONDA_DEFAULT_ENV`, `CONDA_PREFIX`,
-`CONDA_SHLVL` unset — see `environments.v2.md §12`). On Windows, set
-`CREATE_NO_WINDOW (0x08000000)`. Capture both stdout AND stderr — pip errors go
-to stdout. Commands:
-
-- `<conda>/bin/conda install -n <env> -y <pkgs...>` (or `install -y` for `base`)
-- `<env_python> -m pip install <pkgs...>`
-- `<env_python> -m pip install openbb --no-deps` (only when bare `openbb`)
-- `<env>/bin/openbb-build` (after the `--no-deps` install)
-- `<conda>/bin/conda remove -n <env> <pkg> -y`
-- `<env_python> -m pip uninstall <pkg> -y`
-- `<env_python> -m pip install --upgrade <pkg>` (update; pip first)
-- `<conda>/bin/conda install -n <env> <pkg> -y` (update; conda fallback)
-- `<conda>/bin/conda list --name <env> --json` (for `get_environment_extensions`)
+Every spawn must use the conda env-var preamble (`CONDA_ROOT`/`CONDA_ENVS_PATH`/
+`CONDA_PKGS_DIRS`/`CONDARC` set; `CONDA_DEFAULT_ENV`/`CONDA_PREFIX`/
+`CONDA_SHLVL` **unset** — see `environments.v2.md §12`). On Windows: set
+`CREATE_NO_WINDOW (0x08000000)`. Capture stdout AND stderr — pip errors go to
+stdout. Commands: `conda install -n <env> -y <pkgs>`,
+`<env_python> -m pip install <pkgs>`,
+`<env_python> -m pip install openbb --no-deps`, `<env>/bin/openbb-build`,
+`conda remove -n <env> <pkg> -y`, `<env_python> -m pip uninstall <pkg> -y`,
+`<env_python> -m pip install --upgrade <pkg>`, `conda install -n <env> <pkg> -y`
+(update fallback), `conda list --name <env> --json` (for list).
 
 ## Known bugs and port-time fixes
 

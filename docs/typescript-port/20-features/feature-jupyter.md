@@ -187,17 +187,11 @@ in-memory; logs are in `LOG_STORAGE` (also in-memory); the on-disk Jupyter
 config/data/runtime dirs are Jupyter's own, not ours.
 
 ## Error handling
-- **30s URL extraction timeout** → kill child, return `Err`; UI surfaces a toast
-  and flips status to `error` (`environments.tsx:1934`).
-- **Port not extractable from URL** → stop returns `Err`; map entry already
-  removed, so the next click on Start will spawn a new server (potentially racing
-  the orphan if it survived). (`jupyter.rs:516-528`.)
-- **`lsof` not installed / errors** → fallback to `fuser -k <port>/tcp`
-  (`jupyter.rs:432-451`).
-- **Process not in map on stop** → `Err("Jupyter server not running for env X")`.
-- **`already_running` short-circuit** mistakenly fires when the real server died
-  but the map entry was never cleared (e.g. crashed without going through stop):
-  Start returns the stale URL and Open fails. Recovery: user must restart the app.
+- **30s URL timeout** → kill child, return `Err`; UI flips status to `error` (`environments.tsx:1934`).
+- **Port not extractable from URL** → stop returns `Err`; map entry already removed, so Start spawns a fresh server (`jupyter.rs:516-528`).
+- **`lsof` errored / missing** → fallback to `fuser -k <port>/tcp` (`jupyter.rs:432-451`).
+- **Stop called for unknown env** → `Err("Jupyter server not running for env X")`.
+- **Stale `already_running` short-circuit** when the real server died without going through stop: Start returns a dead URL, Open fails. Recovery today: restart the app.
 
 ## ▸ Interfaces with
 - **depends-on** `feature-environments.md` — env must exist and have `jupyterlab`/`notebook`/`jupyter` installed (`hasJupyterSupport` predicate). Working dir comes from env-page state.
@@ -262,27 +256,11 @@ config/data/runtime dirs are Jupyter's own, not ours.
 > almost certainly an oversight.
 
 ## Open questions
-1. **Should port-based stop be replaced with PID-tree tracking?** A TS port that
-   uses `child_process.spawn` could keep the wrapper's `pid` and walk the child
-   tree via `/proc/<pid>/task/<tid>/children` (Linux) or `Get-CimInstance
-   Win32_Process` (Windows). That avoids the "what's listening on this port"
-   ambiguity but adds OS-specific code. The current port-based approach is
-   simpler and was forced by `conda run` detaching grandchildren — if we drop
-   `conda run` in the port (e.g. invoke `<env>/bin/jupyter` directly via the
-   env's interpreter), the wrapper layer disappears and PID tracking becomes
-   sufficient.
-2. **Configurable URL-extraction timeout** vs. content-based readiness probe
-   (poll `GET /api` on the candidate port until 200) — the latter avoids the
-   hard 30s wall but adds an HTTP roundtrip per probe.
-3. **Should we assign the port ourselves?** `--port <n>` after `net.createServer().listen(0)`
-   probe gives us collision detection and a deterministic URL before the child
-   ever runs. Cost: we have to handle the EADDRINUSE race ourselves.
-4. **Drop localStorage-as-IPC entirely?** A `BroadcastChannel('openbb-jupyter')`
-   solves the same problem with typed messages and no 60s freshness hack.
-5. **Reconcile `ACTIVE_JUPYTER_SERVERS` against reality on a periodic sweep?**
-   The current map can hold dead entries forever (`already_running` short-circuit
-   then serves stale URLs). A 30s reaper that pings each URL and evicts on 4xx
-   /timeout would self-heal.
+1. **Replace port-based stop with PID-tree tracking?** If the port drops `conda run` (invoke `<env>/bin/jupyter` via the env's interpreter directly), the grandchild layer disappears and `process.kill(pid, ...)` becomes sufficient. Avoids the "what's listening on this port" ambiguity but loses one Jupyter quirk-tolerance: a server that re-binds to a new port after a crash is no longer findable.
+2. **Configurable URL-extraction timeout** vs. content-based readiness probe (poll `GET <candidate>/api` until 200) — avoids the 30s wall.
+3. **Assign the port ourselves** via `net.createServer().listen(0)` probe + `jupyter lab --port <n>`? Deterministic URL before spawn; handles EADDRINUSE up front.
+4. **Drop localStorage-as-IPC** for a `BroadcastChannel('openbb-jupyter')`? Typed messages, no 60s freshness hack.
+5. **Periodic reaper for `ACTIVE_JUPYTER_SERVERS`?** Today the map can hold dead entries forever (`already_running` then serves stale URLs). A 30s sweep pinging each URL and evicting on 4xx/timeout would self-heal.
 
 ---
 

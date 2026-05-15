@@ -51,11 +51,11 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 | `20-features/feature-environments.md` | `raw-deep-dives/environments.md` + `environments.v2.md` | ✅ |
 | `20-features/feature-extensions.md` | `raw-deep-dives/environments.md` + `installation.md` | ⬜ |
 | `20-features/feature-backend-services.md` | `raw-deep-dives/backend-services.md` + `logs-streaming.md` | ⬜ |
-| `20-features/feature-jupyter.md` | `raw-deep-dives/logs-streaming.md` + `environments.md` | ⬜ |
-| `20-features/feature-api-keys.md` | `raw-deep-dives/api-keys.md` | ⬜ |
+| `20-features/feature-jupyter.md` | `raw-deep-dives/logs-streaming.md` + `logs-streaming.v2.md` + `environments.md` + `environments.v2.md` | ✅ |
+| `20-features/feature-api-keys.md` | `raw-deep-dives/api-keys.md` + `api-keys.v2.md` | ✅ |
 | `20-features/feature-logs-streaming.md` | `raw-deep-dives/logs-streaming.md` + `logs-streaming.v2.md` | ✅ |
 | `20-features/feature-tray-and-autostart.md` | `raw-deep-dives/app-shell.md` + `app-shell.v2.md` | ✅ |
-| `20-features/feature-uninstall.md` | `raw-deep-dives/app-shell.md` | ⬜ |
+| `20-features/feature-uninstall.md` | `raw-deep-dives/app-shell.md` + `app-shell.v2.md` | ✅ |
 | `20-features/feature-platform-rest-api.md` | `raw-deep-dives/platform-rest-api.md` | ⬜ |
 | `20-features/feature-cli-repl.md` | (new deep-dive needed) | ⬜ |
 
