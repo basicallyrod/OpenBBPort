@@ -217,86 +217,75 @@ extension-mutation sites in `feature-extensions.md`.
 
 ### Why envs are the hardest thing to port
 
-1. **`conda` shell-out semantics.** Every spawn must clear
-   `CONDA_DEFAULT_ENV`, `CONDA_PREFIX`, `CONDA_SHLVL` from the parent's
-   environment and set `CONDA_ROOT`, `CONDA_ENVS_PATH`, `CONDA_PKGS_DIRS`,
-   `CONDARC` (`helpers.rs:154-165`). If the desktop is launched from a shell
-   with conda already activated, the inherited vars confuse conda's own
-   activation stack and writes land in the wrong env's `conda-meta/history`.
-2. **Activation script generation.** For terminal/python/ipython/cli launches
-   and for the pyproject.toml import path, the Rust code writes a temp
-   `.bat` (Windows) or `.sh` (Unix) that sets every `CONDA_*` var inline and
-   sources `<conda>/bin/activate <env>` (or `condabin/conda.bat`). The TS port
-   needs the same templating logic — Node's `child_process` can't inherit a
-   conda activation, you have to bake it into the script.
-3. **Output streaming.** Rust's `clean_output_line` (`environments.rs:14-34`)
-   strips ANSI escapes, processes backspaces, and collapses everything after
-   the last `\r` (so pip's `\r`-driven progress redraws don't become 200 log
-   lines). The TS port must reproduce this exactly, or the create log box
-   floods.
-4. **The prefix-collapse dedupe on the frontend** (`environments.tsx:604-621`
-   and `:1525-1544`) — if the previous log starts with `prefix:` and the new
-   one starts with the same `prefix:`, the new one overwrites the last line.
-   This is what makes "Collecting numpy" not appear 80 times.
+1. **`conda` shell-out semantics.** Every spawn must clear `CONDA_DEFAULT_ENV`,
+   `CONDA_PREFIX`, `CONDA_SHLVL` from inherited env and set `CONDA_ROOT`,
+   `CONDA_ENVS_PATH`, `CONDA_PKGS_DIRS`, `CONDARC` (`helpers.rs:154-165`). If
+   the app launches from a shell with conda already activated, those vars
+   confuse conda's activation stack and writes land in the wrong env's
+   `conda-meta/history`.
+2. **Activation script generation.** The pyproject.toml import path writes a
+   temp `.bat`/`.sh` that sets every `CONDA_*` var inline and sources
+   `<conda>/bin/activate <env>` (or `condabin/conda.bat`). Node's
+   `child_process` can't inherit a conda activation — the port has to bake
+   it into the script template.
+3. **Output streaming.** `clean_output_line` (`environments.rs:14-34`) strips
+   ANSI escapes, processes backspaces, and collapses everything after the
+   last `\r` so pip's progress redraws don't flood. Port must reproduce
+   exactly.
+4. **Frontend prefix-collapse dedupe** (`:604-621`, `:1525-1544`) — if the
+   previous log line starts with `prefix:` and the new one starts with the
+   same `prefix:`, the new one overwrites in place. This is what keeps
+   "Collecting numpy" from appearing 80 times.
 
 ## Known bugs and port-time fixes
 
-> ⚠️ BUG — `list_conda_environments` is destructive. The handler at
+> ⚠️ BUG — `list_conda_environments` is destructive. Handler at
 > `environments.rs:1746-1792` deletes every `~/.openbb_platform/environments/
-> <x>.yaml` whose stem isn't currently a directory under `<conda>/envs/`.
-> Listing should be a pure read; cleanup should be a separate, explicit op.
-> Currently a YAML copied from another machine vanishes silently on first
-> page load.
+> <x>.yaml` whose stem isn't a directory under `<conda>/envs/`. A YAML
+> copied from another machine vanishes silently on first page load. Listing
+> should be a pure read; cleanup should be a separate op.
 
 > ⚠️ BUG — `directory` is silently ignored by `remove_environment` and
-> `install_extensions`. Rust signatures take only the names they care about,
-> and Tauri drops the extra fields without warning. The frontend sends
-> `directory` from three sites for `install_extensions`
-> (`environments.tsx:1378, 1577`; `installation-progress.tsx:1155`) and one
-> for `remove_environment` (`environments.tsx:1316-1319`). Drop the
-> parameters in the port.
+> `install_extensions`. Rust signatures only take what they care about;
+> Tauri drops extra fields. Frontend sends `directory` from three sites for
+> `install_extensions` and one for `remove_environment`. Drop the parameters.
 
 > ⚠️ BUG — `removeEnvironment` doesn't consult `backends.json` or
-> `ACTIVE_JUPYTER_SERVERS`. A running backend or Jupyter bound to the env
-> being deleted keeps its now-orphaned binary alive (the kernel holds the
-> inode open after `conda env remove`) and any restart attempt then errors
-> with "Conda executable not found". Port must cascade-stop these services
-> first.
+> `ACTIVE_JUPYTER_SERVERS`. A running backend or Jupyter bound to the
+> deleted env keeps its now-orphaned binary alive (kernel holds the inode);
+> restart then errors with "Conda executable not found". Port must
+> cascade-stop these services first.
 
-> ⚠️ BUG — Smart retry loop is unbounded. Each iteration of the retry loop
-> at `environments.rs:305-401` re-runs `conda env update --prune` (~30s);
-> with `--prune` semantics a cascade of removals can leave the user with a
-> Python-only env that the UI treats as "success". Cap iterations to
-> `min(8, len(packages))` and surface "could not resolve X, Y, Z" instead.
+> ⚠️ BUG — Smart retry loop is unbounded. Each iteration of the loop at
+> `environments.rs:305-401` re-runs `conda env update --prune` (~30s); with
+> `--prune` semantics, a cascade of removals can leave the user with a
+> Python-only env that the UI treats as success. Cap to `min(8, n_pkgs)` and
+> surface "could not resolve X, Y, Z" instead.
 
-> ⚠️ BUG — `env-extensions-cache` consumer mismatch. `backends.tsx:2156-2168`
-> reads `cache[name].path`, which is never written by `environments.tsx`.
-> Harmless today (the field is unused after build), but a schema lie. Either
-> add `path` to the writers or drop it from the reader's `Environment`
-> interface.
+> ⚠️ BUG — `env-extensions-cache` schema mismatch. `backends.tsx:2156-2168`
+> reads `cache[name].path`, never written by `environments.tsx`. Harmless
+> today (field unused after build) but a schema lie. Add `path` to the
+> writers or drop it from the consumer.
 
-> ⚠️ BUG — `update_environment` pip step has no timeout. The conda step at
-> `environments.rs:2876` is wrapped in a 5-minute `tokio::time::timeout`; the
-> pip step at `:2971-2975` uses `.output()` and hangs indefinitely if PyPI
-> stalls. Port should wrap both.
+> ⚠️ BUG — `update_environment` pip step has no timeout. Conda step at
+> `environments.rs:2876` is wrapped in a 5-min `tokio::time::timeout`; pip
+> at `:2971-2975` uses `.output()` and hangs indefinitely. Wrap both.
 
-> ⚠️ BUG — Env-create with concurrent `install_extensions` against the
-> not-yet-created env errors out with `"Environment '{name}' does not exist
-> - Python executable not found"` (`environments.rs:2379-2383`). The
-> frontend prevents this on the current mount via `envCreatedRef`, but a
-> second window has no guard. A coarse per-env mutex at the IPC layer
-> closes the hole — see v2 §8.
+> ⚠️ BUG — Concurrent `create_environment` + `install_extensions` against
+> the not-yet-created env errors out with `"Environment '{name}' does not
+> exist"` (`environments.rs:2379-2383`). The mount-local `envCreatedRef`
+> guard doesn't survive a second window. Need a per-env mutex at the IPC
+> layer.
 
 > ⚠️ BUG — `EnvironmentCreationContext` only locks the three `NavLink`s in
 > `__root.tsx`. The tray menu's *Environments* item, `window.eval`-driven
-> redirects from `navigate_to_page` (`main.rs:393-410`), and child Tauri
-> windows are unaffected. The "lock" is UI sugar, not a real mutex.
+> redirects from `navigate_to_page`, and child Tauri windows ignore it. UI
+> sugar, not a real mutex.
 
-> ⚠️ BUG — No `update_openbb_settings` after env mutations. The wizard
-> calls it once at install (`startup.rs:1293` and twice from
-> `installation-progress.tsx:1162, 1207`). The Environments page never
-> calls it. New `system_settings.json` defaults shipped with a newer
-> `openbb-core` therefore never appear after a manual env create.
+> ⚠️ BUG — No `update_openbb_settings` after env mutations. Wizard calls it
+> at install (`startup.rs:1293`; `installation-progress.tsx:1162, 1207`).
+> Environments page never does. New `system_settings.json` defaults from a
+> newer `openbb-core` never appear after a manual env create.
 
 ## Open questions
 
