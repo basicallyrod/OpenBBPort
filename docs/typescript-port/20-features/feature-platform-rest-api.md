@@ -167,32 +167,25 @@ parallel `openbb-mcp` server (see below).
 
 ## State surfaces
 
-- **Per-process singletons** (Python, in-memory):
-  - `Env()` — frozen snapshot of `os.environ` at module import; NEVER reloads
-    (`core/openbb_core/env.py:11-19`).
-  - `SystemService().system_settings` — frozen Pydantic model loaded once
-    (`service/system_service.py:50-76`); explicit `refresh_system_settings()`
-    exists but isn't called by request handlers.
-  - `ProviderInterface()` (`SingletonMeta`) — the registry of every provider,
-    every model, the generated per-route Pydantic param dataclasses, and the
-    discriminated-union response models. Built once at import.
-  - `widgets_json` dict — built once at boot from the OpenAPI spec
-    (`main.py:109-111`).
-- **Per-request reloads**:
-  - `UserSettings` (credentials, preferences, defaults) — read from
-    `~/.openbb_platform/user_settings.json` on EVERY request, even when auth
-    is disabled. The default value of the `__authenticated_user_settings`
-    parameter is `UserSettings()`, whose `__init__` does
-    `json.load(open(USER_SETTINGS_PATH))` (`model/user_settings.py:22-41`).
-- **Disk files** read at runtime:
-  - `~/.openbb_platform/.env` — `OPENBB_*` vars (boot only).
-  - `~/.openbb_platform/system_settings.json` — CORS, prefix, custom headers,
-    uvicorn kwargs (boot only).
-  - `~/.openbb_platform/user_settings.json` — credentials, prefs, defaults
-    (per request).
-  - `~/.openbb_platform/widget_settings.json` — widget exclude list (boot only).
-  - `~/OpenBBUserData/workspace_apps.json` — user apps (every `/apps.json`).
-  - `~/.openbb_platform/mcp_settings.json` — only consumed by `openbb-mcp`.
+Per-process singletons (Python, in-memory, set once at module import):
+
+| Singleton | Reloads? | Source |
+|---|---|---|
+| `Env()` | No (frozen `os.environ` snapshot) | `~/.openbb_platform/.env` |
+| `SystemService().system_settings` | No (explicit `refresh_*` exists but never called) | `system_settings.json` |
+| `ProviderInterface()` (`SingletonMeta`) | No | walks `openbb_*` entry points |
+| `widgets_json` dict | No (unless `--editable`) | derived from OpenAPI at boot |
+
+Per-request reloads:
+
+- `UserSettings` (credentials/preferences/defaults) — read from
+  `~/.openbb_platform/user_settings.json` on **every** request. The default
+  value of the hidden `__authenticated_user_settings` param is
+  `UserSettings()`, whose `__init__` does `json.load(open(USER_SETTINGS_PATH))`
+  (`model/user_settings.py:22-41`, `commands.py:244`).
+- `default_apps.json` + `~/OpenBBUserData/workspace_apps.json` — read on
+  every `GET /apps.json`.
+- `--agents-json PATH` file — read on every `GET /agents.json`.
 
 ## Persistence
 
@@ -273,104 +266,90 @@ Precedence (CLI > env > `system_settings.json:python_settings.uvicorn` > default
 
 ## Workspace integration: `/widgets.json` and `/apps.json`
 
-These two endpoints are what makes the server useful to OpenBB Workspace.
-
-**`GET /widgets.json`** — generated at boot from the OpenAPI spec via
+**`GET /widgets.json`** — generated at boot via
 `build_json(openapi, widget_exclude_filter)`
-(`extensions/platform_api/openbb_platform_api/utils/widgets.py:233-741`).
-Output is a dict `{widget_id: widget_config}` where `widget_id` =
-`<route_with_slashes_as_underscores>_<provider>_obb`
-(e.g. `equity_price_historical_yfinance_obb`). **A single route with N
-providers becomes N widget entries** with provider-specific params and a
-hidden `provider` param fixed to that provider. Each entry contains
-`name`, `description`, `category`, `subCategory`, `type` (`table`,
-`markdown`, `chart`, `metric`, `pdf`, ...), `endpoint`, `params[]`,
-`gridData`, `data.columnsDefs` (AG-Grid column defs), `mcp_tool` (links to a
-named MCP tool), and `source` (pretty provider name from a hard-coded map).
+(`utils/widgets.py:233-741`). Dict shape `{widget_id: widget_config}`,
+where `widget_id` = `<route_with_slashes_as_underscores>_<provider>_obb`
+(e.g. `equity_price_historical_yfinance_obb`). **One route × N providers =
+N widget entries** with provider-specific params and a hidden `provider`
+param fixed. Each entry has `name`, `description`, `category`,
+`subCategory`, `type` (`table` | `markdown` | `chart` | `metric` | `pdf` |
+`form` | `omni` | `ssrm_table` | `multi_file_viewer`), `endpoint`,
+`params[]`, `gridData`, `data.columnsDefs` (AG-Grid), `mcp_tool` linking to
+a named MCP tool, and `source` (pretty provider name from a hard-coded map
+at `utils/widgets.py:559-575`).
 
-**`GET /apps.json`** — merges three sources (`main.py:174-249`):
-bundled `default_apps.json`, router-contributed `apps.json` files (via
-`get_additional_apps`), and `~/OpenBBUserData/workspace_apps.json`. Order in
-the returned list: **user apps first, defaults after** (`templates.extend(default_templates)` at line 218). Apps whose layout references an unknown
-`widget_id` are **silently dropped** (except `rich_note*` widgets which are
-allowlisted). This is a foot-gun — if a user uninstalls FMP, all their
-FMP-using apps vanish without log message.
+**`GET /apps.json`** — merges bundled `default_apps.json`,
+router-contributed apps, and `~/OpenBBUserData/workspace_apps.json`
+(`main.py:174-249`). Order: **user apps first, defaults after**. Apps
+referencing an unknown `widget_id` are silently dropped (except `rich_note*`
+which is allowlisted) — major foot-gun on provider uninstall.
 
-**`GET /agents.json`** — three modes (`main.py:252-285`): served from
-`--agents-json PATH`, aggregated from router-contributed agents, or `{}`.
+**`GET /agents.json`** — `--agents-json PATH` content, router-aggregated
+agents, or `{}` (`main.py:252-285`).
 
-All three responses carry a custom `X-Backend-Type: OpenBB Platform` header.
+All three carry a custom `X-Backend-Type: OpenBB Platform` header.
 
 ## The dual `openbb-api` / `openbb-mcp` architecture
 
 The default desktop install seeds **two** backend services
 (`desktop/src-tauri/src/tauri_handlers/startup.rs:1428-1480`):
 
-| Backend | Default command | Default port |
+| Backend | Default command | Port |
 |---|---|---|
 | OpenBB Platform API | `openbb-api` | `6900` |
 | OpenBB MCP | `openbb-mcp --transport streamable-http --host 127.0.0.1 --port 8001` | `8001` |
 
 `openbb-mcp` (`extensions/mcp_server/openbb_mcp_server/app/app.py`) is **not
 a separate FastAPI app**. It imports `from openbb_core.api.rest_api import
-app` and wraps it via `FastMCP.from_fastapi(app=fastapi_app, ...)`. So every
-boot-time singleton in §Cold start runs **again** in the MCP process — the
-two servers don't share memory.
+app` and wraps via `FastMCP.from_fastapi(app=fastapi_app, ...)`. So every
+boot-time singleton runs **again** in the MCP process — the two servers
+don't share memory.
 
-Per-tool customisation is via `@router.command(mcp_config={...})` which
-stores name override, enable flag, tags, `describe_responses`, mime type,
-and inline `prompts` in `openapi_extra["mcp_config"]`. Tools are renamed
-`{category}_{subcategory}_{tool}` and the per-tool schema is `compress_schema`-flattened
-for LLM context windows.
+Per-tool config via `@router.command(mcp_config={...})` (name override,
+enable flag, tags, `describe_responses`, mime, inline `prompts`). Tools are
+renamed `{category}_{subcategory}_{tool}` and schemas are
+`compress_schema`-flattened for LLM context.
 
-Transports: `streamable-http` (default, HTTP+SSE-style chunking), `stdio`
-(JSON-RPC over stdin/stdout for Claude Desktop / Cursor style clients), or
-`sse` (legacy, wrapped with shutdown handler). Auth via
-`OPENBB_MCP_SERVER_AUTH=user,pass` (Bearer of base64(user:pass) — **not
-JWT**).
+Transports: `streamable-http` (default, HTTP+SSE chunking), `stdio` (JSON-RPC
+over stdin/stdout for Claude Desktop / Cursor), `sse` (legacy). Auth via
+`OPENBB_MCP_SERVER_AUTH=user,pass` (Bearer of base64(user:pass), **not JWT**).
 
-> ⚠️ Critical coupling: when an MCP tool is invoked, the MCP server makes an
-> outbound HTTP call **back to the REST server** at
-> `http://<settings.uvicorn_config.host>:<port>/api/v1/...`. The MCP process
-> embeds an httpx client (`OPENBB_MCP_HTTPX_CLIENT_KWARGS`, optional
-> `OPENBB_MCP_CLIENT_AUTH`). If the REST server is stopped or its port has
-> drifted (auto-increment), every MCP tool call fails with
-> `ConnectError`. The desktop UI does NOT couple their lifecycles.
+> ⚠️ Critical: when an MCP tool fires, the MCP server makes an outbound HTTP
+> call **back to the REST server** at `http://...:6900/api/v1/...`. If REST
+> is stopped or its port drifted (auto-increment), every MCP tool call
+> 502s with `ConnectError`. The desktop UI does NOT couple their lifecycles.
 
-The port team must decide whether to keep both as separate processes
-(simplest, matches Python), share a single in-process server (the same
-FastAPI app can mount both — easy if Strategy A), or drop MCP entirely
-(viable if Workspace + desktop are the only consumers).
+The port team must decide: keep both processes (matches Python), share one
+HTTP host that speaks both protocols (Strategy A — easy), or drop MCP if
+Workspace + desktop are the only consumers.
 
 ## Cold start cost
 
-`openbb-api` from invocation to listening socket is typically **8-15 s** on a
-full openbb install. Dominated by:
+`openbb-api` invocation → listening socket is typically **8-15 s** on a full
+openbb install. Dominated by, in order:
 
 1. Entry-point discovery for `openbb_core_extension`, `openbb_provider_extension`,
    `openbb_obbject_extension`.
-2. Each extension's `__init__.py` runs, each `Router.command(model="X")` call
-   triggers `SignatureInspector.complete(func, model)` which lazily
-   initialises `ProviderInterface()` — a singleton built from `RegistryMap`
-   walking every fetcher in every provider.
-3. `ProviderInterface._generate_return_annotations` runs `create_model("OBBject_X", ...)`
+2. Each extension's `__init__.py` runs every `Router.command(model="X")`,
+   each call triggers `SignatureInspector.complete` which initialises the
+   `ProviderInterface()` singleton — `RegistryMap` walks every fetcher in
+   every provider.
+3. `ProviderInterface._generate_return_annotations` runs `create_model(...)`
    per model — Pydantic dynamic-model creation + validator compilation, the
    slowest single step.
 4. `app.openapi()` called eagerly at `main.py:107` — walks every route's
-   discriminated-union response_model, emits the schema. **Several seconds
-   on its own.**
-5. `get_widgets_json(...)` — iterates `routes × providers` (~hundreds of
-   entries), each one walks the OpenAPI components recursively. **2-5 s.**
+   discriminated-union response_model. Several seconds on its own.
+5. `get_widgets_json(...)` — iterates `routes × providers` and recursively
+   walks OpenAPI components. **2-5 s.**
 
-This is **before uvicorn binds the listen socket**, so the desktop's
-"backend starting" spinner has a multi-second window with no port reachable.
-`feature-backend-services.md` confirms it detects readiness by either child
-exit or by parsing the URL line out of stdout.
+This runs **before uvicorn binds the listen socket**. The desktop's "backend
+starting" spinner has a multi-second window with no port reachable;
+`feature-backend-services.md` detects readiness by stdout URL parsing.
 
-For a TS rewrite (Strategy A), the equivalent build step — constructing all
-the per-route Zod schemas and discriminated unions — should be done at **TS
-build time**, not at runtime. Generated code in the bundle instead of
-reflective metaclass work. Boot would then be <500 ms.
+For a TS rewrite (Strategy A), construct per-route Zod schemas and
+discriminated unions at **TS build time** — generated code in the bundle, not
+reflective work at process start. Boot then <500 ms.
 
 ## ▸ Interfaces with
 

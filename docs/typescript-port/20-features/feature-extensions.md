@@ -159,46 +159,28 @@ dependencies:
 
 On install (`environments.rs:2620-2648`): parse existing YAML, split each new
 package on `=`/`<`/`>` for its name-part, drop existing entries matching that
-name, append the new entries. Last-writer-wins.
-
-> ⚠️ BUG: the version-pin splitter handles `=`, `<`, `>` but not `~=`, `===`,
-> `!=` (`environments.v2.md §3`). A user-supplied `openbb-platform-api~=1.5`
-> creates a duplicate entry in the pip list.
-
-> ⚠️ BUG: if `<env>.yaml` is missing when `install_extensions` runs, the
-> install succeeds but the YAML merge is silently skipped with `log::warn!`
-> (`environments.rs:2673-2675`). Subsequent `update_environment` then hard-fails
-> with "Environment YAML file not found" (`environments.v2.md §4`).
+name, append the new ones. Last-writer-wins. See Known Bugs for the missing-YAML
+fall-through and the version-pin parser hole.
 
 ## The `openbb` special case — the only special handler
 
 When the extensions array contains the bare string `"openbb"` (case-insensitive),
-the Rust handler runs **two** extra commands (`environments.rs:2480-2533`):
+the Rust handler runs two extra commands (`environments.rs:2480-2533`):
 
-1. `<env_python> -m pip install openbb --no-deps` — the `openbb` PyPI package is
-   a meta-package that would pull in every provider at a pinned version; the
-   desktop wants to manage those itself.
+1. `<env_python> -m pip install openbb --no-deps` — the `openbb` PyPI package
+   is a meta-package that would pull in every provider at a pinned version;
+   the desktop wants to manage those itself.
 2. `<install>/conda/envs/<env>/bin/openbb-build` (or `Scripts/openbb-build.exe`).
 
 What `openbb-build` does (`openbb_platform/core/openbb_core/build.py`):
-- Runs `<sys.executable> -c "import openbb"`, triggering
-  `PackageBuilder.auto_build()`.
-- That walks every registered router's command signature and generates a static
-  Python module tree under `<openbb>/static/package/` so user code can
-  `from openbb import obb` with IDE completion.
-- Acquires `flock` on `<openbb>/static/.build.lock` — concurrent calls error.
-- Writes `<openbb>/static/assets/reference.json` (used by future `auto_build()`
-  to short-circuit when no rebuild is needed).
-- Takes 30-90s on a full extension set. Frontend gets **no streaming** — just a
-  spinner.
-
-> ⚠️ BUG: wizard step 3 invokes `execute_in_environment("openbb-build")` after
-> `install_extensions` (`installation-progress.tsx:1157-1161`), but the default
-> extension set never includes bare `"openbb"`, so the `--no-deps` path never
-> runs, `openbb-build` is never installed in the env, and the subsequent
-> standalone invocation fails. The frontend swallows it as a warning
-> (`installation.v2.md §4.3` & §11). Port-time fix: detect any `openbb-*`
-> package in the install list and run `openbb-build` then.
+runs `<sys.executable> -c "import openbb"`, which triggers
+`PackageBuilder.auto_build()`. That walks every registered router's command
+signature and generates a static Python module tree under
+`<openbb>/static/package/` so user code can `from openbb import obb` with IDE
+completion. Acquires `flock` on `<openbb>/static/.build.lock` (concurrent
+calls error). Writes `<openbb>/static/assets/reference.json` (used by future
+`auto_build()` to short-circuit). Takes 30-90s on a full extension set, with
+**no streaming** to the frontend.
 
 ## Error handling
 
@@ -276,77 +258,58 @@ stdout. Commands: `conda install -n <env> -y <pkgs>`,
 
 ## Known bugs and port-time fixes
 
-> ⚠️ BUG 1: `install_extensions` / `remove_extension` / `update_extension`
-> ignore the `directory` payload (`environments.v2.md §6.8`). Port: drop the
-> param or honour it.
+> ⚠️ BUG 1: `directory` payload is ignored by all three mutating handlers
+> (`environments.v2.md §6.8`). Port: drop param or honour it.
 
-> ⚠️ BUG 2: Concurrent `install_extensions` calls race on the YAML rewrite
-> (`environments.md §6.5`, `environments.v2.md §8`). Port: per-env coarse
-> lock at the handler level.
+> ⚠️ BUG 2: Concurrent `install_extensions` race on the YAML rewrite
+> (`environments.md §6.5`). Port: per-env handler-level lock.
 
-> ⚠️ BUG 3: Missing `<env>.yaml` causes the install to succeed but YAML merge
-> to be silently skipped; later `update_environment` hard-fails. Port:
-> synthesise a minimal YAML if absent.
+> ⚠️ BUG 3: Missing `<env>.yaml` → install succeeds but YAML merge silently
+> skipped; later `update_environment` hard-fails (`environments.v2.md §4`).
+> Port: synthesise a minimal YAML if absent.
 
 > ⚠️ BUG 4: Wizard step 3's standalone `openbb-build` call fails by default
 > because `install_extensions` never installs the binary (bare `"openbb"`
-> isn't in the default set). Port: detect any `openbb-*` package and run
-> `openbb-build` then.
+> isn't in the default set — `installation.v2.md §4.3`). Port: detect any
+> `openbb-*` package and run `openbb-build` then.
 
 > ⚠️ BUG 5: Cancel only hides the modal; backend keeps running. Port: track
-> the spawned child PID per install request and signal on cancel.
+> spawned child PID and signal on cancel.
 
 > ⚠️ BUG 6: Catalog re-fetches on every modal open. Port: cache in IndexedDB
-> with 5-10 min TTL.
+> with TTL.
 
 > ⚠️ BUG 7: Version-pin parser doesn't handle `~=`, `===`, `!=` — duplicate
-> YAML entries on custom packages using those operators
-> (`environments.v2.md §3`). Port: PEP 440 specifier parser.
+> YAML entries (`environments.v2.md §3`). Port: PEP 440 specifier parser.
 
-> ⚠️ BUG 8: `install_extensions` emits no `process-output` stream (no
-> `processId` is plumbed — `installation.v2.md §4.2`). User sees only a
-> spinner for a potentially 5-10 min install. Port: stream pip/conda output
-> via a per-request channel.
+> ⚠️ BUG 8: `install_extensions` emits no `process-output` stream
+> (`installation.v2.md §4.2`). User sees only a spinner for a 5-10 min
+> install. Port: stream pip/conda output per-request.
 
 ## Open questions
 
-1. **Should the `<env>.yaml` rewrite be transactional?** Today: read → mutate
-   in-memory → write back. A crash or concurrent writer leaves YAML out of sync
-   with conda. Options: (a) atomic `.tmp` + rename; (b) journal under
-   `~/.openbb_platform/environments/.journal/`; (c) treat `conda list --json`
-   as source of truth and demote YAML to a regen-on-demand cache. (c) breaks
-   YAML's role as seed for `update_environment` / `create_environment_from_requirements`.
-
-2. **Should the port serialize concurrent installs per env?** No serialization
-   beyond conda's own lockfile today. A per-env `AsyncMutex` (or queue) is the
-   minimum. Reject the second request with 409 "busy", or queue it? Queuing is
-   friendlier but lets the user stack confusing operations.
-
-3. **Catalog source of truth.** Keep frontend-direct fetching, proxy through
-   the TS server (for caching + offline), or bundle as static assets refreshed
-   on app update?
-
-4. **Always run `openbb-build` after any `openbb-*` install?** Eliminates Bug 4
-   at the cost of 30-90s extra time per install touching OpenBB packages.
-
-5. **Encoding ambiguity.** `<channel>:<name>` wire format breaks if a conda
-   version string ever contains `:`. Switch to structured
-   `{kind, channel, name, version}` over JSON?
-
+1. **Should the `<env>.yaml` rewrite be transactional?** Today's read → mutate
+   → write back leaves YAML out of sync with conda on crash. Options: atomic
+   `.tmp` + rename; journal under `~/.openbb_platform/environments/.journal/`;
+   demote YAML to a regen-on-demand cache (breaks its role as seed for
+   `update_environment` / `create_environment_from_requirements`).
+2. **Should the port serialize concurrent installs per env?** Per-env
+   `AsyncMutex` minimum. Reject with 409 "busy" or queue? Queuing lets the
+   user stack confusing operations.
+3. **Catalog source of truth.** Frontend-direct fetch, proxy through the TS
+   server (cache + offline), or bundle as static assets refreshed on app
+   update?
+4. **Always run `openbb-build` after any `openbb-*` install?** Eliminates Bug
+   4 at 30-90s extra per touch.
+5. **Encoding ambiguity.** `<channel>:<name>` breaks if a conda version
+   string contains `:`. Switch to structured `{kind, channel, name, version}` JSON?
 6. **Consolidate the dual selector?** `AddExtensionSelector.tsx` and
-   `InstallComponents.tsx::ExtensionSelector` are near-duplicates
-   (`environments.md §6.2`).
+   `InstallComponents.tsx::ExtensionSelector` are near-duplicates.
 
 ## Cross-feature dependencies
 
-- **depends-on** `feature-environments.md` — env must exist; YAML manifest
-  lives in env's namespace.
-- **depends-on** `feature-installation.md` — bundles the conda binary; seeds
-  the first `openbb` env this feature then populates.
-- **depended-on-by** `feature-platform-rest-api.md` — installed packages are
-  what the REST server imports.
-- **depended-on-by** `feature-jupyter.md` — kernel ships from the env;
-  notebook deps installed via this feature.
+- **depends-on** `feature-environments.md`, `feature-installation.md`.
+- **depended-on-by** `feature-platform-rest-api.md`, `feature-jupyter.md`.
 - **shares-state-with** `feature-environments.md` via
   `~/.openbb_platform/environments/<env>.yaml` and
   `localStorage["env-extensions-cache"]`.
