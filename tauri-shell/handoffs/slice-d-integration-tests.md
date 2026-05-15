@@ -7,35 +7,29 @@ under `cargo test --no-run`. The `bindings_export` test is gated behind the
 ## 1. Purpose
 
 Slice D verifies the **infrastructure layer that the shell owns** — the parts
-the connector author should never have to re-test. Concretely: the in-memory
-ring buffer (`state::LogBuffer`), the process-monitor facade
-(`process_monitor::*`), atomic JSON writes (`settings::write_json_atomic`),
-the HTTP client wrapper (`proxy::Proxy`), the cross-platform kill helpers
-(`process_kill::*`), the bounded shutdown cascade (`cleanup::cleanup_all_processes`),
-and the Slice A bindings export driver. The `Connector` trait surface from
-Slice B is also covered here because the no-op fallback path is itself
-shell-owned behaviour.
+a connector author should never re-test: the ring buffer
+(`state::LogBuffer`), the process-monitor facade (`process_monitor::*`),
+atomic JSON writes (`settings::write_json_atomic`), the HTTP client wrapper
+(`proxy::Proxy`), the cross-platform kill helpers (`process_kill::*`), the
+bounded shutdown cascade (`cleanup::cleanup_all_processes`), and the
+Slice A bindings export driver. The Slice B `Connector` trait is also
+covered because the no-op fallback is shell-owned.
 
-Why **integration** tests rather than `#[cfg(test)] mod tests` inside each
-module:
+Why **integration** tests over `#[cfg(test)] mod tests`:
 
-- These modules are the *contract surface* between the shell crate and any
-  downstream connector or CLI binary. Tests under `tests/` use the public
-  API only — they are the same view a connector author has, which means a
-  breaking change to a `pub` item fails CI immediately rather than silently
-  leaving private helpers passing.
-- The tests rely on real OS resources (tempdirs, real subprocesses, real
-  TCP listeners, a real mock HTTP server). Wiring that up inline in `src/`
-  would force every module to grow a `[dev-dependencies]` surface and
-  pollute its imports.
+- These modules are the *contract surface* with any downstream connector or
+  CLI binary. Tests under `tests/` use the public API only, so a breaking
+  change to a `pub` item fails CI immediately.
+- The tests need real OS resources (tempdirs, subprocesses, TCP listeners,
+  mock HTTP). Wiring that into `src/` would force each module to import
+  `[dev-dependencies]`.
 - Several tests need `tauri::test::mock_app` (`tests/cleanup.rs:13`), which
   is only available when `tauri` is brought in with the `test` feature —
-  which `Cargo.toml:93` does in `[dev-dependencies]` exactly so it doesn't
-  contaminate release builds.
+  done in `Cargo.toml:93` under `[dev-dependencies]` so release builds stay
+  clean.
 
 The suite is hermetic: no real network, no shared on-disk state, and tests
-that touch process-global singletons are serialised with `#[serial]` from
-`serial_test`.
+that touch process-global singletons are serialised with `#[serial]`.
 
 ## 2. What was built
 
@@ -277,26 +271,20 @@ a second on a modern laptop.
 
 ## 6. Known limitations + gaps
 
-- **No Tauri end-to-end tests.** `tests/cleanup.rs` uses `MockRuntime`,
-  but that's the limit of the official Tauri test scaffolding — there's
-  no headless tests of the actual `tauri::generate_handler!` dispatch.
-  A future agent could write a `tests/ipc_dispatch.rs` that calls
-  `invoke_command` against the mock app, but the public API for that is
-  still unstable in Tauri 2.x.
+- **No Tauri end-to-end tests.** `MockRuntime` is the limit of Tauri's
+  official scaffolding; no headless coverage of `generate_handler!`
+  dispatch (public API still unstable in Tauri 2.x).
 - **No tests for the 60 typed wrappers in `obb_routes.rs` or the 167 in
-  `obb_routes_extended.rs`.** Each wrapper is a 2-line `call_get` /
-  `call_post`, and `tests/proxy.rs` already covers the underlying
-  `Proxy::get` / `Proxy::post`. Adding 227 near-identical wrapper tests
-  would add noise without catching real bugs; a property-test that
-  enumerates all wrappers from a manifest would be a better next step.
-- **No tests for `tray.rs`, `autostart/*`, `updater.rs`, or `windows.rs`.**
-  These are heavily OS-specific (osascript / COM / XDG `.desktop` / Tauri
-  updater HTTP signature). Mocking them out is more work than the bugs
-  they would catch; they're left to manual verification.
-- **No tests for `process_spawn.rs`.** Spawning a process and asserting
-  on the *streamed* event payload requires an `AppHandle` with a real
-  event bus, which `MockRuntime` does not fully provide. The pid-based
-  side effects are tested via `process_kill.rs` and `cleanup.rs`.
+  `obb_routes_extended.rs`.** Each is a 2-line `call_get` / `call_post`;
+  `tests/proxy.rs` covers the underlying `Proxy::get` / `Proxy::post`.
+  A future property-test enumerating wrappers from a manifest would
+  beat 227 near-identical tests.
+- **No tests for `tray.rs`, `autostart/*`, `updater.rs`, `windows.rs`.**
+  OS-specific (osascript / COM / XDG / updater HTTP signature). Mocking
+  costs more than the bugs would catch; left to manual verification.
+- **No tests for `process_spawn.rs`.** Streamed event payload assertions
+  need a real event bus; `MockRuntime` doesn't fully provide one.
+  Pid-side effects are covered by `process_kill.rs` and `cleanup.rs`.
 
 ## 7. Integration with other slices
 
@@ -343,35 +331,26 @@ tests/settings.rs
 
 Recipe for a new integration test against module `foo`:
 
-1. **Create `tests/foo.rs`.** Open with a `//! ...` doc comment that
-   describes the surface under test and any global-state implications.
-   Mirror the existing files' header style.
-2. **Import only the public API.** `use tauri_shell::foo::{...}` — never
-   reach into private items. If something you need is private, promote
-   it to `pub(crate)` and re-export via `lib.rs`, or write a thin public
-   helper.
-3. **Pick the test flavour.**
-   - Pure data / sync: plain `#[test] fn ...()`.
-   - Async (HTTP, tokio): `#[tokio::test]` (multi-thread) or
-     `#[tokio::test(flavor = "current_thread")]` if you need deterministic
-     timer behaviour.
-4. **Decide whether you touch a global.** If yes
-   (`LOG_STORAGE`, `INSTALLATION_PROGRESS`, mock `AppHandle`-managed
-   state), add `#[serial]` from `serial_test`. Otherwise prefer a
-   freshly-constructed local (`fresh_storage()` pattern in
-   `tests/process_monitor.rs:18`).
-5. **For filesystem tests:** use `tempfile::TempDir::new()` and pass the
-   `dir.path().join("...")` to the function under test. Return the
-   `TempDir` from your helper so it lives until the end of the test
-   (Rust drop order matters).
-6. **For HTTP tests:** start a `MockServer` per test, build a `Proxy`
-   pointed at `server.base_url()`, and end with `mock.assert_async().await`.
-7. **For subprocess tests:** keep the spawn behind a `#[cfg(unix)] / #[cfg(windows)]`
-   pair (see `tests/process_kill.rs:13-27`). Always `child.wait()` on
-   the success path so you don't leave zombies.
-8. **Verify locally:** `cargo test --test foo` then `cargo test`.
-9. **Update this handoff** with the new file's line count and a brief
-   per-test summary.
+1. **Create `tests/foo.rs`** with a `//! ...` header describing the surface
+   under test and any global-state implications.
+2. **Import only the public API.** `use tauri_shell::foo::{...}`. If
+   something you need is private, promote it to `pub(crate)` and re-export
+   via `lib.rs`, or add a thin public helper.
+3. **Pick the test flavour:** plain `#[test]`, `#[tokio::test]`, or
+   `#[tokio::test(flavor = "current_thread")]` (latter when you need
+   deterministic timer behaviour, as in `tests/cleanup.rs`).
+4. **Touch a global?** If yes (`LOG_STORAGE`, `INSTALLATION_PROGRESS`,
+   mock-managed state) add `#[serial]`. Otherwise build a fresh local —
+   see `fresh_storage()` in `tests/process_monitor.rs:18`.
+5. **Filesystem tests:** `tempfile::TempDir::new()`, return the `TempDir`
+   from your helper so Rust drop order keeps it alive.
+6. **HTTP tests:** one `MockServer` per test, point `Proxy` at
+   `server.base_url()`, end with `mock.assert_async().await`.
+7. **Subprocess tests:** guard the spawn helper with
+   `#[cfg(unix)] / #[cfg(windows)]` (see `tests/process_kill.rs:13-27`);
+   always `child.wait()` on the success path so you don't leave zombies.
+8. **Verify:** `cargo test --test foo`, then `cargo test`. Update this
+   handoff with the new file's line count and per-test summary.
 
 ---
 

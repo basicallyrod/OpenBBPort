@@ -8,44 +8,31 @@ override demo in `tauri-shell/tests/connector.rs` (10 passing tests).
 
 ## 1. Purpose
 
-Before this slice, every domain command that needed to talk to a real
-backend was a separate `#[tauri::command]` returning
-`Err(IpcError::NotImplemented(...))` with a `// TODO: connect to your
-backend` comment. Forty-something such stubs were scattered across eight
-files. A user who wanted to wire the shell to (say) a Python REST
-service had to:
-
-1. Find every `// TODO` comment by grep.
-2. Re-implement the body of every command in-place.
-3. Re-derive how the command threads `AppHandle`, `State<RunningProcesses>`,
-   etc. — every stub was its own little dialect.
-4. Keep that fork in sync with upstream as new stubs got added.
+Before this slice, every domain command that needed a real backend was
+a separate `#[tauri::command]` returning `Err(IpcError::NotImplemented)`
+with a `// TODO: connect to your backend` comment. Forty-something such
+stubs were scattered across eight files; a user wiring the shell to a
+real backend had to grep for every TODO, re-implement each command in
+place, re-derive how it threads `AppHandle`/`State`, and keep the fork
+in sync as new stubs landed upstream.
 
 The Connector trait replaces all of that with a single seam:
 
 - **The shell decides UX.** Window management, log streaming, the tray,
-  shutdown cascade, dialog pickers, file-system writes — all of these
-  stay in the shell because they're inherently coupled to Tauri APIs
-  and the renderer event bus.
-- **The connector decides behavior.** Anything that requires choosing
-  *what* to do (install conda? hit an HTTP endpoint? spawn a Node
-  sidecar?) is on the trait. The connector author implements the methods
-  they care about; everything else inherits a `NotImplemented` default.
+  shutdown cascade, dialog pickers, file-system writes — these stay in
+  the shell because they're coupled to Tauri APIs and the renderer
+  event bus.
+- **The connector decides behavior.** Anything that picks *what* to do
+  (install conda? hit an HTTP endpoint? spawn a Node sidecar?) is on
+  the trait. Authors implement only the methods they care about;
+  everything else inherits a `NotImplemented` default.
 
-This split lets users swap entire backends without forking `ipc/*.rs`
-and lets us add new domain commands without re-asking every connector
-author to write a stub.
-
-Practical consequences:
-
-- `cargo check` passes on a fresh clone (the default `NoopConnector` is
-  not a build-time blocker).
-- A real connector is one file with one `impl Connector for MyConnector`
-  block — and the author overrides only what they need.
-- Domain modules in `src/ipc/` are now nearly identical four-liners
-  (`connector.method(args).await.map_err(IpcError::from)`), so adding a
-  new command means adding a trait method and a thin handler — not a
-  bespoke implementation.
+Practical consequences: `cargo check` passes on a fresh clone (the
+`NoopConnector` default is not a build-time blocker); a real connector
+is one file with one `impl Connector for MyConnector` block; and
+domain modules in `src/ipc/` are now nearly identical four-liners
+(`connector.method(args).await.map_err(IpcError::from)`), so adding a
+new command means adding a trait method and a thin handler.
 
 ---
 
@@ -157,100 +144,75 @@ pub struct NoopConnector;
 impl Connector for NoopConnector {}
 ```
 
-That's the entire impl — the trait's defaults supply every method body,
-so `NoopConnector` returns `Err(ConnectorError::NotImplemented(...))`
-for every call.
+The trait's defaults supply every method body, so `NoopConnector`
+returns `Err(ConnectorError::NotImplemented(...))` for every call.
 
 **Purpose:** keep the shell buildable and runnable without any backend
-wired. `cargo run --bin tauri-shell` on a fresh clone produces a working
-desktop app where the stubbed commands return a structured error the
-renderer can recognise (`IpcError::NotImplemented`).
+wired. `cargo run` on a fresh clone produces a working desktop app
+where stubbed commands return a structured error the renderer
+recognises (`IpcError::NotImplemented`).
 
-**When to use:**
+**When to use:** during shell development before a real connector
+exists; in integration tests that exercise non-stub commands without
+needing a backend; as the explicit "I haven't wired anything"
+reference behavior.
 
-- During shell development, before you've written your real connector.
-- In integration tests that exercise non-stub commands (REST proxy,
-  routines, settings files) without needing a backend.
-- As the explicit "I haven't wired anything" reference behavior — useful
-  when documenting the override surface.
-
-**Why it's the default:** `main.rs:71` registers
-`Arc::new(NoopConnector)` so a forked repo that hasn't replaced the
-managed state still compiles and runs. The test
-`noop_connector_returns_not_implemented_for_every_method` at
-`tests/connector.rs:189-230` probes 20 methods across every domain to
-guarantee this contract.
+**Why it's the default:** `main.rs:71` registers `Arc::new(NoopConnector)`
+so a forked repo that hasn't replaced the managed state still compiles
+and runs. The test `noop_connector_returns_not_implemented_for_every_method`
+at `tests/connector.rs:189-230` probes 20 methods across every domain
+to guarantee this contract.
 
 ---
 
 ## 5. Implementing your own connector
 
-Concrete walkthrough:
-
-**Step 1.** Add the trait dependencies to your `Cargo.toml`:
+**Step 1.** Add deps to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tauri-shell = { path = "../tauri-shell" }   # or git/version
+tauri-shell = { path = "../tauri-shell" }
 async-trait = "0.1"
 ```
 
-**Step 2.** Declare the struct (typically in `connectors/mine/src/lib.rs`
-or directly in `src/main.rs` for a single-binary fork):
+**Step 2.** Declare the struct (in `connectors/mine/src/lib.rs` or
+directly in `src/main.rs` for a single-binary fork):
 
 ```rust
 use tauri_shell::connector::{Connector, ConnectorError};
 use async_trait::async_trait;
 
-pub struct MyConnector {
-    // Any state you need: HTTP client, settings handle, channel, etc.
-    http: reqwest::Client,
-    base_url: String,
-}
-
-impl MyConnector {
-    pub fn new(base_url: String) -> Self {
-        Self { http: reqwest::Client::new(), base_url }
-    }
-}
+pub struct MyConnector { http: reqwest::Client, base_url: String }
 ```
 
 **Step 3.** Implement only the methods you care about. Every method you
 don't override inherits the default `NotImplemented` body — see
 `tests/connector.rs:29-68` for a four-method override and
-`tests/connector.rs:157-169` for a regression test that proves
-un-overridden methods still fall through:
+`tests/connector.rs:157-169` for the regression test proving
+un-overridden methods fall through:
 
 ```rust
 #[async_trait]
 impl Connector for MyConnector {
     async fn toggle_theme(&self, theme: String) -> Result<bool, ConnectorError> {
-        // Persist to your prefs store, then succeed.
         Ok(matches!(theme.as_str(), "light" | "dark" | "system"))
     }
-
-    // ... add only the methods you implement; leave the rest defaulted.
+    // ...add only the methods you implement.
 }
 ```
 
 **Step 4.** Replace the registration line in `main.rs:71`:
 
 ```rust
-// Before
-.manage::<Arc<dyn Connector>>(Arc::new(NoopConnector))
-
-// After
-.manage::<Arc<dyn Connector>>(Arc::new(MyConnector::new("http://localhost:6900".into())))
+.manage::<Arc<dyn Connector>>(Arc::new(MyConnector::new(...)))
 ```
 
 The `Arc<dyn Connector>` turbofish is load-bearing: without it Tauri
-would store the value under the concrete type's `TypeId` and the
-`State<'_, Arc<dyn Connector>>` extractor in the IPC handlers wouldn't
-find it.
+stores the value under the concrete type's `TypeId` and the
+`State<'_, Arc<dyn Connector>>` extractor won't find it.
 
-**Step 5.** Run `cargo check` (or `cargo build`) and that's the wiring
-complete. Every IPC command whose trait method you overrode now hits
-your code; every command you didn't override returns
+**Step 5.** `cargo check`. Every IPC command whose trait method you
+overrode now hits your code; the rest return
 `IpcError::NotImplemented("<method>")` to the renderer.
 
 ---
