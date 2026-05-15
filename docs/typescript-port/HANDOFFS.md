@@ -47,7 +47,7 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 
 | Feature doc | Reads | Status |
 |---|---|---|
-| `20-features/feature-installation.md` | `raw-deep-dives/installation.md` | ⬜ |
+| `20-features/feature-installation.md` | `raw-deep-dives/installation.md` | ✅ |
 | `20-features/feature-environments.md` | `raw-deep-dives/environments.md` | ⬜ |
 | `20-features/feature-extensions.md` | `raw-deep-dives/environments.md` + `installation.md` | ⬜ |
 | `20-features/feature-backend-services.md` | `raw-deep-dives/backend-services.md` + `logs-streaming.md` | ⬜ |
