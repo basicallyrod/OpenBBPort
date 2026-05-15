@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>tauri-shell IPC smoke test</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>tauri-shell IPC smoke test</h1>
+      <p class="sub">
+        Click any button below to exercise a representative command from each
+        family. Output appears in the <em>Result</em> pane on the right.
+      </p>
+      <div class="meta">
+        <span id="version-badge">version: ?</span>
+        <span id="install-badge">install: ?</span>
+        <span id="base-url-badge">base-url: ?</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="commands">
+        <fieldset>
+          <legend>App / version</legend>
+          <button data-cmd="get_installation_state">get_installation_state</button>
+          <button data-cmd="get_app_version">get_app_version</button>
+          <button data-cmd="navigate_forward">navigate_to_page (→ /dashboard)</button>
+          <button data-cmd="navigate_back">navigate_to_page (→ /)</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Infrastructure / logs</legend>
+          <button data-cmd="register_process_monitoring">register_process_monitoring</button>
+          <button data-cmd="get_process_logs_history">get_process_logs_history + clear</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Helpers / filesystem</legend>
+          <button data-cmd="get_home_directory">get_home_directory</button>
+          <button data-cmd="select_directory">select_directory (dialog)</button>
+          <button data-cmd="check_directory_exists">check_directory_exists</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Credentials</legend>
+          <button data-cmd="get_user_credentials">get_user_credentials</button>
+          <button data-cmd="update_user_credentials">update_user_credentials</button>
+          <button data-cmd="open_credentials_file">open_credentials_file</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>OpenBB proxy</legend>
+          <button data-cmd="obb_set_base_url">obb_set_base_url</button>
+          <button data-cmd="obb_get_base_url">obb_get_base_url</button>
+          <button data-cmd="obb_health">obb_health</button>
+          <button data-cmd="obb_widgets">obb_widgets</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Data routes</legend>
+          <button data-cmd="equity_price_historical">equity_price_historical (typed)</button>
+          <button data-cmd="obb_call_equity">obb_call (generic equity)</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Introspection</legend>
+          <button data-cmd="list_all_routes">list_all_routes</button>
+          <button data-cmd="provider_list">provider_list</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Settings files</legend>
+          <button data-cmd="settings_round_trip">read + write settings.json round-trip</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Routines (CRUD)</legend>
+          <button data-cmd="routines_crud">routines_save + list + delete</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Stubs (expected to error)</legend>
+          <button data-cmd="list_backend_services">list_backend_services</button>
+          <button data-cmd="list_conda_environments">list_conda_environments</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Server attach</legend>
+          <button data-cmd="server_attach">server_attach (localhost:6900)</button>
+          <button data-cmd="server_health">server_health</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Run all</legend>
+          <button id="run-all" data-cmd="run_all">Run every smoke test sequentially</button>
+        </fieldset>
+      </section>
+
+      <aside class="output">
+        <h2>Result</h2>
+        <pre id="result">(click a button)</pre>
+
+        <h2>Install progress</h2>
+        <progress id="install-progress" max="100" value="0"></progress>
+        <span id="install-progress-text">idle</span>
+
+        <h2>Navigate events</h2>
+        <pre id="navigate-log">(none yet)</pre>
+
+        <h2>Live process output</h2>
+        <pre id="process-output">(register a process and emit events to see lines here)</pre>
+      </aside>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

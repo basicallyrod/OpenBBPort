@@ -1,0 +1,21 @@
+{
+  "name": "tauri-shell-example-frontend",
+  "version": "0.1.0",
+  "description": "Minimal TypeScript frontend exercising ~30 representative tauri-shell IPC commands.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
