@@ -24,58 +24,25 @@ unaffected.
 
 ### 2.1 Annotated source structs (36 types, 18 files touched)
 
-Every struct that crosses the IPC boundary gained two attributes:
+Every struct that crosses the IPC boundary gained two attributes
+(camelCase structs add a third `rename_all = "camelCase"` arg):
 
 ```rust
 #[cfg_attr(feature = "bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "bindings", ts(export, export_to = "../bindings/"))]
 ```
 
-(camelCase structs add a third `rename_all = "camelCase"` arg.)
+The 36-type list itself is in §4 below (kept there so source + artifact
+sit in the same row). Categorical breakdown:
 
-| # | Type | Source | Category |
-|---|---|---|---|
-| 1 | `LogEntry` | `tauri-shell/src/state.rs:22` | State |
-| 2 | `InstallationSnapshot` | `tauri-shell/src/state.rs:245` | State |
-| 3 | `InstallationProgress` | `tauri-shell/src/state.rs:277` | State |
-| 4 | `ProcessOutputEvent` | `tauri-shell/src/events.rs:47` | Event |
-| 5 | `InstallProgressEvent` | `tauri-shell/src/events.rs:91` | Event |
-| 6 | `BackendUrlEvent` | `tauri-shell/src/events.rs:105` | Event |
-| 7 | `JupyterStatusEvent` | `tauri-shell/src/events.rs:115` | Event |
-| 8 | `NavigateEvent` | `tauri-shell/src/events.rs:124` | Event |
-| 9 | `BackendService` | `tauri-shell/src/ipc/backends.rs:25` | IPC payload |
-| 10 | `GenerateCertArgs` | `tauri-shell/src/ipc/certs.rs:19` | IPC args |
-| 11 | `UpdateCredentialsArgs` | `tauri-shell/src/ipc/credentials.rs:42` | IPC args |
-| 12 | `CondaEnvironment` | `tauri-shell/src/ipc/environments.rs:23` | IPC payload |
-| 13 | `Extension` | `tauri-shell/src/ipc/environments.rs:32` | IPC payload |
-| 14 | `ExecResult` | `tauri-shell/src/ipc/environments.rs:192` | IPC payload |
-| 15 | `JupyterStatus` | `tauri-shell/src/ipc/jupyter.rs:32` | IPC payload |
-| 16 | `McpSpec` | `tauri-shell/src/ipc/mcp.rs:21` | IPC args |
-| 17 | `McpStatus` | `tauri-shell/src/ipc/mcp.rs:46` | IPC payload |
-| 18 | `ObbCallArgs` | `tauri-shell/src/ipc/obb.rs:20` | IPC args |
-| 19 | `RouteInfo` | `tauri-shell/src/ipc/openbb_meta.rs:33` | IPC payload |
-| 20 | `RouteSearchArgs` | `tauri-shell/src/ipc/openbb_meta.rs:110` | IPC args |
-| 21 | `RouteParamsArgs` | `tauri-shell/src/ipc/openbb_meta.rs:134` | IPC args |
-| 22 | `ProviderSummary` | `tauri-shell/src/ipc/provider.rs:17` | IPC payload |
-| 23 | `ProviderValidateArgs` | `tauri-shell/src/ipc/provider.rs:93` | IPC args |
-| 24 | `RoutineMetadata` | `tauri-shell/src/ipc/routines.rs:52` | IPC payload |
-| 25 | `RoutinesReadArgs` | `tauri-shell/src/ipc/routines.rs:92` | IPC args |
-| 26 | `RoutinesSaveArgs` | `tauri-shell/src/ipc/routines.rs:108` | IPC args |
-| 27 | `RoutinesDeleteArgs` | `tauri-shell/src/ipc/routines.rs:126` | IPC args |
-| 28 | `RoutinesRenameArgs` | `tauri-shell/src/ipc/routines.rs:144` | IPC args |
-| 29 | `ServerSpec` | `tauri-shell/src/ipc/server.rs:25` | IPC args |
-| 30 | `ServerStatus` | `tauri-shell/src/ipc/server.rs:49` | IPC payload |
-| 31 | `ReadJsonArgs` | `tauri-shell/src/ipc/settings_files.rs:39` | IPC args |
-| 32 | `WriteJsonArgs` | `tauri-shell/src/ipc/settings_files.rs:52` | IPC args |
-| 33 | `ReadTextArgs` | `tauri-shell/src/ipc/settings_files.rs:68` | IPC args |
-| 34 | `WriteTextArgs` | `tauri-shell/src/ipc/settings_files.rs:85` | IPC args |
-| 35 | `IpcError` | `tauri-shell/src/ipc/mod.rs:37` | Error envelope |
-| 36 | `JsonValue` | `serde_json::Value` (transitive) | Bridge type |
-
-`JsonValue` (#36) is not declared in our source; it comes from the
-`serde-json-impl` feature of `ts-rs` and lands at
-`tauri-shell/bindings/serde_json/JsonValue.ts`. It is the TS analogue of
-`serde_json::Value` and is what every `Value`-typed field references.
+- **State** (3): `LogEntry`, `InstallationSnapshot`, `InstallationProgress` — `src/state.rs`.
+- **Events** (5): `ProcessOutputEvent`, `InstallProgressEvent`, `BackendUrlEvent`, `JupyterStatusEvent`, `NavigateEvent` — `src/events.rs`.
+- **IPC payloads** (10): `BackendService`, `CondaEnvironment`, `Extension`, `ExecResult`, `JupyterStatus`, `McpStatus`, `RouteInfo`, `ProviderSummary`, `RoutineMetadata`, `ServerStatus` — across `src/ipc/`.
+- **IPC args** (16): `GenerateCertArgs`, `UpdateCredentialsArgs`, `McpSpec`, `ObbCallArgs`, `RouteSearchArgs`, `RouteParamsArgs`, `ProviderValidateArgs`, `RoutinesReadArgs`, `RoutinesSaveArgs`, `RoutinesDeleteArgs`, `RoutinesRenameArgs`, `ServerSpec`, `ReadJsonArgs`, `WriteJsonArgs`, `ReadTextArgs`, `WriteTextArgs`.
+- **Error envelope** (1): `IpcError` — `src/ipc/mod.rs:37`.
+- **Bridge** (1): `JsonValue` — transitive via `ts-rs`'s `serde-json-impl`
+  feature; lands at `tauri-shell/bindings/serde_json/JsonValue.ts` and is
+  imported by any struct with a `serde_json::Value` field.
 
 ### 2.2 Test harness
 
@@ -336,27 +303,21 @@ That is what `ts-rs` v9 emits. JSON `null` and `boolean` are missing.
 Workaround: type the fields you care about with a stricter local type,
 or upgrade `ts-rs` when the upstream fix lands and re-run the export.
 
-### 6.5 `index.ts` is positional `export type` only
+### 6.5 `index.ts` does not re-export `JsonValue`
 
-The barrel does not re-export runtime values (none of the types are
-runtime values anyway since `ts-rs` emits type-only output), but it also
-doesn't re-export the nested `serde_json/JsonValue`. A consumer who
-imports `JsonValue` from `./bindings` will not find it — they have to
+The barrel walks the top-level `bindings/` directory only, so a consumer
+who imports `JsonValue` from `./bindings` will not find it — they have to
 import from `./bindings/serde_json/JsonValue`. Fix: extend
 `rebuild_index` (`tauri-shell/tests/bindings_export.rs:105`) to also walk
 the `serde_json/` subdir.
 
 ### 6.6 No `tsc --noEmit` check
 
-§2 of SPEC.md asked for `tsc --noEmit bindings/index.ts` as a
-verification step. The repo does not ship a `tsconfig.json` at
-`tauri-shell/bindings/`, so this remains a manual step. Two paths:
-
-- Drop a minimal `tsconfig.json` next to `index.ts` and document the
-  check in `bindings/README.md`.
-- Defer to Slice F's TS frontend, which has a `tsconfig.json` of its
-  own and will indirectly compile-check the bindings when it imports
-  them.
+SPEC.md asked for `tsc --noEmit bindings/index.ts` as a verification
+step. The repo does not ship a `tsconfig.json` at `tauri-shell/bindings/`,
+so this remains manual. Either drop a minimal `tsconfig.json` next to
+`index.ts`, or defer to Slice F's frontend which compile-checks the
+bindings transitively when it imports them.
 
 ## 7. Verification commands
 

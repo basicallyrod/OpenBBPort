@@ -420,7 +420,7 @@ live at `src/connector.rs:95-197`: `InstallToDirectoryArgs`,
 
 ## 8. Cleanup integration
 
-The cleanup cascade is a separate parallel trait, `ShutdownHook`,
+The cleanup cascade uses a separate parallel trait, `ShutdownHook`,
 defined at `src/cleanup.rs:37-42`:
 
 ```rust
@@ -433,42 +433,22 @@ pub trait ShutdownHook<R: Runtime = tauri::Wry>: Send + Sync {
 Why a separate trait rather than another method on `Connector`?
 
 1. **Different lifetime.** `Connector` methods are called per-invoke
-   from inside Tauri's IPC worker. `ShutdownHook::shutdown` runs once
-   inside the bounded cleanup cascade (`OUTER_TIMEOUT = 10s`,
-   `HOOK_TIMEOUT = 3s` at `src/cleanup.rs:27-29`), from the SIGINT/
-   `ExitRequested`/tray-quit code paths.
-2. **Different ownership.** `ShutdownHook` needs to be `Runtime`-generic
-   so tests can register it on a `MockRuntime` app handle (see
-   `src/cleanup.rs:37`). Making `Connector` runtime-generic would force
-   every IPC command's `State<'_, Arc<dyn Connector<R>>>` extractor to
-   spell out the runtime parameter, and Tauri's `generate_handler!`
-   macro doesn't handle that cleanly.
+   from Tauri's IPC worker. `ShutdownHook::shutdown` runs once inside
+   the bounded cleanup cascade (`OUTER_TIMEOUT = 10s`,
+   `HOOK_TIMEOUT = 3s` at `src/cleanup.rs:27-29`) from SIGINT /
+   `ExitRequested` / tray-quit.
+2. **Different ownership.** `ShutdownHook` is `Runtime`-generic so
+   tests can register it on a `MockRuntime` app handle. Making
+   `Connector` runtime-generic would force every
+   `State<'_, Arc<dyn Connector<R>>>` extractor to spell out the
+   parameter — `generate_handler!` doesn't handle that cleanly.
 3. **Different default.** `NoopShutdownHook` at `src/cleanup.rs:45-50`
-   is a real, callable no-op — there's no error to surface from a
-   shutdown that "did nothing". `NoopConnector` returns
-   `NotImplemented` because *not having a body* is the error state for
-   a normal trait method.
+   is a real callable no-op (a shutdown that did nothing isn't an
+   error). `NoopConnector` returns `NotImplemented` because not having
+   a body *is* the error state for a normal trait method.
 
-Why a connector author might want to implement both:
-
-```rust
-impl Connector for MyConnector { /* IPC delegation */ }
-
-#[async_trait::async_trait]
-impl ShutdownHook for MyConnector {
-    async fn shutdown(&self, app: AppHandle) {
-        // Gracefully stop everything I spawned: backend processes,
-        // Jupyter servers, MCP servers. The cleanup cascade gives me
-        // 3 seconds; whatever I don't stop here gets SIGKILLed by the
-        // tracked-process kill step (src/cleanup.rs:66-75).
-        for status in self.list_jupyter_servers_inner().await {
-            let _ = self.stop_jupyter_server_inner(&status.id, &app).await;
-        }
-    }
-}
-```
-
-Then register both in `main.rs`:
+Why a connector author might want to implement both — register the
+same `Arc` under two `dyn` views:
 
 ```rust
 let connector = Arc::new(MyConnector::new(...));
@@ -477,13 +457,11 @@ builder
     .manage::<Arc<dyn Connector>>(connector)
 ```
 
-Same `Arc`, two different `dyn` views. The `Arc::clone` is essentially
-free, and the connector now governs both the "do work on demand"
-surface and the "stop cleanly at exit" surface.
-
-`main.rs:67` currently registers `NoopShutdownHook` for the same
-default-it-works reason as `NoopConnector` — the shell exits cleanly on
-a fresh clone even though the hook is a no-op.
+Then `impl ShutdownHook for MyConnector` gracefully stops everything it
+spawned (backends, Jupyter, MCP). The 3-second budget is enforced by
+the cascade; whatever isn't stopped gets SIGKILLed at
+`src/cleanup.rs:66-75`. `main.rs:67` currently registers
+`NoopShutdownHook` so the shell exits cleanly on a fresh clone.
 
 ---
 
@@ -583,55 +561,43 @@ cargo clippy -- -D warnings
 
 What's still `NotImplemented`:
 
-- Every method on `NoopConnector`. That's by design — the question is
-  what to *replace* it with. Until a Slice-H reference impl lands, any
-  real shell deployment writes its own connector.
-- The trait does not yet cover **`get_installation_state`** /
-  **`get_installation_status`**. Both stay non-trait because they read
-  the boot snapshot from `crate::state::InstallationState` and the
-  global `INSTALLATION_PROGRESS` mirror — the shell owns that state,
-  the connector merely writes into it.
-- **Cancellation propagation.** Long-running connector calls
-  (`install_conda`, `setup_python_environment`,
-  `create_environment_from_requirements`) don't accept a cancellation
-  token. The shell has `CancellationRegistry` state and an
-  `abort_installation(directory)` trait method, but the convention for
-  threading a `tokio_util::sync::CancellationToken` into the call site
-  isn't decided. Open question: pass a token via args, or have the
-  connector look it up by `process_id` from the registry?
+- Every method on `NoopConnector` — by design. Until Slice H ships a
+  reference impl, real deployments write their own connector.
+- `get_installation_state` / `get_installation_status` are NOT on the
+  trait. They stay non-trait because they read the boot snapshot from
+  `crate::state::InstallationState` and the global
+  `INSTALLATION_PROGRESS` mirror — the shell owns that state, the
+  connector writes into it.
+- **Cancellation propagation.** Long-running calls (`install_conda`,
+  `setup_python_environment`, `create_environment_from_requirements`)
+  don't take a cancellation token. The shell has `CancellationRegistry`
+  and an `abort_installation(directory)` method, but the convention for
+  threading a `CancellationToken` isn't decided — pass via args, or
+  look up by `process_id`?
 - **Streaming returns.** `mcp_list_tools` returns a single
-  `serde_json::Value`. If a future MCP tool catalog is large enough to
-  benefit from streaming, we'd need either a typed channel return or an
-  event-based pattern. Currently event-based is the rule (see
-  `process-output`, `backend-url-discovered`, etc. in `events.rs`).
+  `serde_json::Value`. If a future tool catalog wants streaming, we'd
+  need a channel or event-based pattern (current rule: event-based, see
+  `process-output`, `backend-url-discovered`).
 
 Recommended next refactor waves:
 
-1. **Macro to collapse domain delegation handlers.** Every command
-   handler is now an identical four-liner
-   (`connector.method(args).await.map_err(IpcError::from)`). A
-   `delegate!(install_to_directory, InstallToDirectoryArgs)` macro
-   would drop ~400 lines from `src/ipc/`. Wait until Slice A's
-   ts-rs annotations stabilise so we know the macro doesn't need to
-   re-emit the structs.
+1. **Macro to collapse delegation handlers.** Every command handler is
+   the same four-liner. A `delegate!(install_to_directory,
+   InstallToDirectoryArgs)` macro would drop ~400 lines from
+   `src/ipc/`. Wait until Slice A's ts-rs annotations stabilise.
 2. **`forward_to_http!` macro for the HTTP-proxy connector.** Pattern
-   §6a is currently ~10 lines per method × 35 methods = 350 lines of
-   nearly-identical boilerplate. A `forward!(install_to_directory POST
-   args -> bool)` macro brings that to ~35 lines, one per route.
-3. **Decide cancellation convention.** Pick a pattern (token in args
-   vs. registry lookup) and document it. Until then, the connector
-   author has to invent their own.
-4. **Promote `ServerSpec` / `McpSpec` / `BackendService` out of `ipc/`
-   and into a `domain/` module.** Right now the trait reaches across
-   `crate::ipc::backends::BackendService` etc., which is fine but
-   slightly odd layering. A `crate::domain::*` module would make it
-   clearer that these are connector-facing types, not handler-internal.
-5. **`Connector` builder helper.** Encapsulate
-   `.manage::<Arc<dyn ShutdownHook>>(...)` + `.manage::<Arc<dyn
-   Connector>>(...)` into a single
-   `tauri_shell::register(builder, my_connector)` call so users can't
-   forget either side.
+   §6a is ~10 lines × 35 methods. A `forward!(install_to_directory POST
+   args -> bool)` macro collapses it to one line per route.
+3. **Decide cancellation convention.** Pick token-in-args vs.
+   registry-lookup, document it. Until then connectors invent their own.
+4. **Promote `ServerSpec` / `McpSpec` / `BackendService` to
+   `crate::domain::*`.** The trait reaches across
+   `crate::ipc::backends::BackendService` etc.; a dedicated module
+   would clarify these are connector-facing, not handler-internal.
+5. **`tauri_shell::register(builder, my_connector)` helper.** Single
+   call to register both `Arc<dyn Connector>` and `Arc<dyn ShutdownHook>`
+   so users can't forget either side.
 
-When Slice H lands, this handoff should be updated with a "reference
-implementations" section pointing at `connectors/http-proxy/src/lib.rs`
-and `connectors/openbb-platform/src/lib.rs`.
+When Slice H lands, update this handoff with pointers to
+`connectors/http-proxy/src/lib.rs` and
+`connectors/openbb-platform/src/lib.rs`.
