@@ -161,23 +161,10 @@ sequenceDiagram
 
 ## State surfaces
 
-- **React state** (`environments.tsx`):
-  - `jupyterStatus: { [env]: 'starting' | 'stopping' | 'running' | 'stopped' | 'error' }` (`:1791-1870`).
-  - `jupyterUrlRef.current[env]: string | null` — ref, not state, to dodge re-renders (`:300`).
-  - 3s polling `setInterval` that only ticks envs in `{starting, stopping, undefined}` and self-clears (`:1862`).
-  - 30s "starting → error" timeout (`:1832`).
-- **Rust static state**:
-  - `ACTIVE_JUPYTER_SERVERS: Lazy<Mutex<HashMap<String, (String, u32)>>>` (`jupyter.rs:9-10`).
-    Schema: env-name → `(jupyter_url, pid_of_conda_wrapper)`. Sole source of truth
-    for "is this env's Jupyter running and where?". Never reconciled against
-    actual OS processes; entries leak if env is removed without a stop.
-  - **Not** registered in `RunningProcesses` — Jupyter never calls `add_process`
-    (`environments.v2.md §5`, `logs-streaming.md §7.4`).
-- **Cross-window state** (see "Cross-window status propagation" below): localStorage
-  keys `jupyter-shutdown-<env>` with timestamps; 60s freshness check.
-- **Disk files**: none directly. Jupyter itself reads
-  `<install>/Jupyter/jupyter_config|jupyter_data|jupyter_runtime` because those
-  paths are exported as env vars at spawn (`jupyter.rs:88-93`).
+- **React (`environments.tsx`):** `jupyterStatus[env]` (`:1791-1870`); `jupyterUrlRef.current[env]` ref (`:300`); 3s polling setInterval that only ticks envs in `{starting, stopping, undefined}` and self-clears (`:1862`); 30s starting→error wall (`:1832`).
+- **Rust static:** `ACTIVE_JUPYTER_SERVERS: Lazy<Mutex<HashMap<String, (String, u32)>>>` (`jupyter.rs:9-10`). Schema **env-name → (jupyter_url, pid_of_conda_wrapper)** — sole truth for "is it running and where". Never reconciled against the OS; entries leak if env is removed without stopping (`environments.v2.md §1`). Jupyter **never** registers in `RunningProcesses` (`logs-streaming.md §7.4`).
+- **Cross-window:** localStorage keys `jupyter-shutdown-<env>` with `Date.now()` timestamps; 60s freshness check (see below).
+- **Disk:** none of ours. Jupyter itself reads `<install>/Jupyter/jupyter_config|jupyter_data|jupyter_runtime` because those paths are exported as env vars at spawn (`jupyter.rs:88-93`).
 
 ## Cross-window status propagation
 
@@ -213,22 +200,12 @@ config/data/runtime dirs are Jupyter's own, not ours.
   Start returns the stale URL and Open fails. Recovery: user must restart the app.
 
 ## ▸ Interfaces with
-- **depends-on** `feature-environments.md` — env must exist and have
-  `jupyterlab`/`notebook`/`jupyter` installed; `hasJupyterSupport` predicate gates
-  the button. Working directory comes from env-page state.
-- **depends-on** `feature-extensions.md` — `install_extensions` is what gets the
-  prerequisite packages into the env.
-- **depends-on** `feature-logs-streaming.md` — `process-output` event channel,
-  `LOG_STORAGE` buffer under key `jupyter-<env>`, `open_jupyter_logs_window`
-  webview spawn, `JupyterLogsPage` rendering, log-window shutdown observer.
-- **depends-on** `feature-app-shell.md` — quit-time cleanup cascade calls
-  `stop_all_jupyter_servers` inside a 3s `tokio::time::timeout`
-  (`app-shell.md §7`, lines 426-435). On overrun the Jupyter children outlive
-  the app.
-- **depended-on-by** `feature-uninstall.md` (transitive: stop everything before
-  removing files).
-- **shares-state-with** `feature-environments.md` via `jupyterStatus` /
-  `jupyterUrlRef` React state, both of which live on the Environments page.
+- **depends-on** `feature-environments.md` — env must exist and have `jupyterlab`/`notebook`/`jupyter` installed (`hasJupyterSupport` predicate). Working dir comes from env-page state.
+- **depends-on** `feature-extensions.md` — `install_extensions` is what gets those packages into the env.
+- **depends-on** `feature-logs-streaming.md` — `process-output` channel, `LOG_STORAGE` buffer under key `jupyter-<env>`, `open_jupyter_logs_window`, `JupyterLogsPage` rendering, log-window shutdown observer.
+- **depends-on** `feature-app-shell.md` — quit-time cleanup cascade calls `stop_all_jupyter_servers` inside a 3s `tokio::time::timeout` (`app-shell.md §7`, lines 426-435). On overrun, Jupyter children outlive the app.
+- **depended-on-by** `feature-uninstall.md` (stop everything before removing files).
+- **shares-state-with** `feature-environments.md` via `jupyterStatus` / `jupyterUrlRef` (both live on the Environments page).
 
 ## TS port mapping
 

@@ -180,19 +180,18 @@ Conda" checkbox is hard-locked on).
 ## TS port mapping
 | Tauri call | TS equivalent | Notes |
 |---|---|---|
-| `invoke('uninstall_application', …)` | `ipcMain.handle('uninstall:run', …)` | Same handler shape; resolve to `void` once OS-specific cleanup is queued. |
-| `window.emit('uninstall_progress', s)` | `mainWindow.webContents.send('uninstall:progress', s)` | Frontend uses `ipcRenderer.on`. |
-| `disable_autostart` (per-OS) | `app.setLoginItemSettings({ openAtLogin: false })` (mac/win) + manual `~/.config/autostart/openbb-platform.desktop` removal (Linux) | See `feature-tray-and-autostart.md` for the symmetric set. |
-| `taskkill /F /IM openbb-platform.exe /T` | `child_process.exec('taskkill …')` or `process.kill(pid)` if you tracked PIDs | Keep the shell-out for "any leftover" sweep; track known PIDs for graceful kill first. |
-| `pkill -f "conda.*envs"` | `child_process.exec('pkill -f …')` | Same shell-out works on macOS+Linux. |
-| `reg delete HKCU\…\Run /v OpenBB…` | `child_process.exec('reg delete …')` or `winreg` npm package | The 4×5 sweep is defensive; port it as-is. |
-| `launchctl unload ~/Library/LaunchAgents/…` | `child_process.exec('launchctl unload …')` | Defensive legacy cleanup; current code never creates the plist. |
-| `fs::remove_dir_all(p)` with retry → `rd /s /q` / `rm -rf` fallback | `fs.rm(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })` | Node's built-in retry covers the Windows lock case. Shell fallback rarely needed. |
-| `Uninstall-Miniforge3.exe /S` | same shell-out via `child_process.spawn` | Detect file existence first. |
-| `cmd /C start "title" <bat>` | `child_process.spawn('cmd', ['/C','start',…], { detached: true })` | Keep visible window unless port redesigns Windows shutdown. |
-| `osascript -e 'display notification …'` | `new Notification(...)` from Electron's `Notification` | Native dialog without shell-out. |
-| `std::process::exit(0)` inside handler | `app.exit(0)` in the IPC handler after enqueueing the cleanup script | macOS path. |
-| `invoke('app.exit')` (typo) | **Remove entirely.** Replace JS-side with `invoke('quit_application')` or signal the kill via the main process directly. | See bugs. |
+| `invoke('uninstall_application', …)` | `ipcMain.handle('uninstall:run', …)` | Same shape; resolve once OS-specific cleanup is queued. |
+| `window.emit('uninstall_progress', s)` | `webContents.send('uninstall:progress', s)` | `ipcRenderer.on` on FE. |
+| `disable_autostart` (per-OS) | `app.setLoginItemSettings({openAtLogin:false})` + Linux `.desktop` rm | See `feature-tray-and-autostart.md`. |
+| `taskkill /F /IM …` / `pkill -f …` | `child_process.exec(...)` or `process.kill(pid)` | Keep shell-out for leftover sweep; track PIDs for graceful kill first. |
+| `reg delete HKCU\…\Run` (4×5 sweep) | `child_process.exec('reg delete …')` or `winreg` | Defensive — port as-is. |
+| `launchctl unload …LaunchAgents/…` | `child_process.exec('launchctl unload …')` | Defensive legacy cleanup. |
+| `fs::remove_dir_all` w/ retry + `rd /s /q` / `rm -rf` fallback | `fs.rm(p, {recursive:true, force:true, maxRetries:5, retryDelay:200})` | Node retry handles Windows locks. |
+| `Uninstall-Miniforge3.exe /S` | `child_process.spawn(...)` after existence check | — |
+| `cmd /C start "title" <bat>` | `child_process.spawn('cmd', ['/C','start',…], {detached:true})` | Keep visible window unless redesigned. |
+| `osascript -e 'display notification …'` | Electron `new Notification(...)` | No shell-out needed. |
+| `std::process::exit(0)` inside handler | `app.exit(0)` after enqueueing cleanup script | macOS path. |
+| `invoke('app.exit')` (typo) | **Drop**; use `invoke('quit_application')` or main-process kill. | See bugs. |
 
 ## Known bugs and port-time fixes
 
