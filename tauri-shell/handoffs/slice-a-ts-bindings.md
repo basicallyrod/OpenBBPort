@@ -74,14 +74,12 @@ which scans the output dir and writes `index.ts` as a barrel.
 
 ### 2.4 Cargo plumbing
 
-- `tauri-shell/Cargo.toml:54` — optional `ts-rs` dep with the
-  `serde-json-impl` + `chrono-impl` features. The `chrono-impl` feature is
-  there because `LogEntry` and event payloads use `chrono::Utc` timestamps
-  internally (the wire format is `i64` ms-since-epoch, but bringing it in
-  guards against future `DateTime<Utc>` fields).
-- `tauri-shell/Cargo.toml:75-81` — feature definitions; `bindings =
-  ["dep:ts-rs"]` is the only entry that touches `ts-rs`, so default
-  builds neither compile nor link it.
+- `tauri-shell/Cargo.toml:54` — optional `ts-rs` v9 with
+  `serde-json-impl` + `chrono-impl` features (the latter guards against
+  future `DateTime<Utc>` fields).
+- `tauri-shell/Cargo.toml:75-81` — `bindings = ["dep:ts-rs"]` is the
+  only entry that touches `ts-rs`, so default builds neither compile
+  nor link it.
 
 ## 3. How to use
 
