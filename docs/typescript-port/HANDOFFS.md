@@ -64,13 +64,13 @@ a `## v2 Addendum` section, OR written to a separate `*.v2.md` file.
 
 | Doc | Reads | Status |
 |---|---|---|
-| `10-architecture/architecture-overview.md` | all feature docs | ⬜ |
+| `10-architecture/architecture-overview.md` | all feature docs | ✅ |
 | `10-architecture/ipc-bridge.md` | `raw-deep-dives/ipc-bridge.md` | ⬜ |
 | `10-architecture/process-lifecycle.md` | `logs-streaming.md`, `backend-services.md`, `app-shell.md` | ⬜ |
-| `10-architecture/state-and-storage.md` | all | ⬜ |
+| `10-architecture/state-and-storage.md` | all | ✅ |
 | `30-port/port-strategy.md` | `platform-rest-api.md` + all feature docs | ⬜ |
 | `30-port/port-tech-stack.md` | `ipc-bridge.md` + `app-shell.md` | ✅ |
-| `30-port/port-invoke-mapping.md` | every feature doc's translation table | ⬜ |
+| `30-port/port-invoke-mapping.md` | every feature doc's translation table | ✅ |
 | `30-port/port-roadmap.md` | all | ⬜ |
 | `30-port/port-design-process.md` | all | ⬜ |
 | `00-overview.md` | all | ⬜ |
