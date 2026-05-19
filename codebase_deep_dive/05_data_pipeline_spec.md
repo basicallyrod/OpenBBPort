@@ -15,7 +15,26 @@ SDK / REST call
   -> OBBject(results=[...])
 ```
 
-Each arrow is a contract enforced by either Pydantic, a `Fetcher` classmethod, or an `assert` in `Fetcher.test()`. The remainder of this document anchors each contract to a file and line range, then shows how to preserve them when adding a new provider.
+```mermaid
+flowchart TD
+    A["SDK / REST call<br/>obb.equity.price.historical(symbol, provider)"]
+    B["CommandRunner<br/>core/openbb_core/app/command_runner.py"]
+    C["ParametersBuilder<br/>Pydantic ValidationError on bad kwargs"]
+    D["QueryExecutor<br/>provider/query_executor.py:65-97<br/>raises OpenBBError if credentials missing"]
+    E["Fetcher.fetch_data<br/>provider/abstract/fetcher.py:73-85"]
+    F["transform_query(params: dict) -> Q"]
+    G["extract_data / aextract_data<br/>External HTTP API<br/>raises EmptyDataError / UnauthorizedError"]
+    H["transform_data(query, data)<br/>per-row Model.model_validate<br/>raises ValidationError"]
+    I["OBBject(results=list[D])"]
+
+    A --> B --> C --> D --> E
+    E --> F --> G --> H --> I
+
+    classDef gate fill:#fff3cd,stroke:#856404,color:#000
+    class C,D,G,H gate
+```
+
+Each arrow is a contract enforced by either Pydantic, a `Fetcher` classmethod, or an `assert` in `Fetcher.test()`. Highlighted nodes are the four points where data can be rejected. The remainder of this document anchors each contract to a file and line range, then shows how to preserve them when adding a new provider.
 
 ## 2. End-to-End Request Flow
 
@@ -39,7 +58,83 @@ async def fetch_data(cls, params, credentials=None, **kwargs):
 
 The return value is a list of `Data` subclass instances (here, `list[YFinanceEquityHistoricalData]`), which `CommandRunner` wraps in an `OBBject` and returns. Every input/output boundary above is Pydantic-enforced; the next section walks through each enforcement point.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as SDK / REST caller
+    participant CR as CommandRunner
+    participant PB as ParametersBuilder
+    participant QE as QueryExecutor
+    participant F as YFinanceEquityHistoricalFetcher
+    participant API as Yahoo Finance
+
+    U->>CR: obb.equity.price.historical(symbol="AAPL", provider="yfinance")
+    CR->>PB: build per-route Pydantic model from merged provider schemas
+    PB-->>CR: validated kwargs (or raises ValidationError)
+    CR->>QE: execute(provider="yfinance", model="EquityHistorical")
+    QE->>QE: filter_credentials (raises OpenBBError if missing)
+    QE->>F: fetch_data(params, credentials)
+    F->>F: transform_query(params) -> Q
+    F->>API: extract_data: HTTP GET (uses Q.__alias_dict__)
+    API-->>F: raw DataFrame
+    Note over F: if data.empty: raise EmptyDataError
+    F->>F: transform_data(query, data)
+    Note over F: per-row YFinanceEquityHistoricalData.model_validate
+    F-->>QE: list[YFinanceEquityHistoricalData]
+    QE-->>CR: list[D]
+    CR-->>U: OBBject(results=list[D])
+```
+
 ## 3. Validation Layers
+
+The validation surface is two parallel inheritance chains — one inbound (`QueryParams`) and one outbound (`Data`) — meeting at the provider's concrete classes. Standard models in the middle define the route contract; provider classes add backend-specific knobs and aliases.
+
+```mermaid
+classDiagram
+    direction LR
+    class QueryParams {
+        +__alias_dict__
+        +__json_schema_extra__
+        +model_config: extra=allow
+        +model_dump: applies outbound aliases
+    }
+    class EquityHistoricalQueryParams {
+        +symbol: str
+        +start_date: date | None
+        +end_date: date | None
+        +to_upper validator (mode=before)
+    }
+    class YFinanceEquityHistoricalQueryParams {
+        +interval: Literal[13 choices]
+        +extended_hours: bool
+        +include_actions: bool
+        +adjustment: Literal[2 choices]
+        +_period, _ignore_tz, ...: PrivateAttr
+    }
+    QueryParams <|-- EquityHistoricalQueryParams
+    EquityHistoricalQueryParams <|-- YFinanceEquityHistoricalQueryParams
+
+    class Data {
+        +__alias_dict__
+        +model_config: extra=allow, strict=False
+        +AliasGenerator: to_camel / to_snake
+        +ForceInt: BeforeValidator(check_int)
+        +_use_alias: model_validator(mode=before)
+    }
+    class EquityHistoricalData {
+        +date: date | datetime
+        +open, high, low, close: float
+        +volume, vwap: optional
+        +date_validate (dateutil.parser)
+    }
+    class YFinanceEquityHistoricalData {
+        +__alias_dict__: {split_ratio:stock_splits, dividend:dividends}
+        +split_ratio: float | None
+        +dividend: float | None
+    }
+    Data <|-- EquityHistoricalData
+    EquityHistoricalData <|-- YFinanceEquityHistoricalData
+```
 
 ### 3.1 QueryParams base class
 
@@ -169,6 +264,28 @@ That is the only error path in the yfinance fetcher; everything else surfaces as
 
 File: `openbb_platform/core/openbb_core/provider/abstract/fetcher.py`.
 
+The pipeline is named for the three data-shape transitions: a raw `dict` becomes a typed query, a typed query becomes a raw response, a raw response becomes a list of validated `Data` instances.
+
+```mermaid
+flowchart LR
+    A["params: dict[str, Any]<br/>{symbol: 'AAPL', interval: '1d',<br/>start_date: ..., end_date: ...}"]
+    B["transform_query<br/>fetcher.py:42-45<br/>yfinance:117-131"]
+    C["Q: YFinanceEquityHistoricalQueryParams<br/>typed, defaults filled,<br/>Literals validated"]
+    D["extract_data / aextract_data<br/>fetcher.py:47-54<br/>yfinance:133-167"]
+    E["raw: pandas.DataFrame<br/>(or list[dict] for JSON APIs)<br/>EmptyDataError on empty"]
+    F["transform_data<br/>fetcher.py:55-58<br/>yfinance:169-193"]
+    G["list[YFinanceEquityHistoricalData]<br/>each row through Model.model_validate<br/>ValidationError on bad row"]
+
+    A --> B --> C --> D --> E --> F --> G
+
+    classDef typed fill:#d4edda,stroke:#155724,color:#000
+    classDef raw fill:#f8d7da,stroke:#721c24,color:#000
+    class C,G typed
+    class A,E raw
+```
+
+Green nodes are typed and validated; red nodes are untyped. The pipeline's job is to move from red to green in two steps, with the boundary in the middle being where the external API speaks.
+
 Every concrete provider implements `Fetcher[Q, R]` where `Q` is its `QueryParams` subclass and `R` is typically `list[D]`. The class declares three required staticmethods.
 
 `transform_query(params: dict) -> Q` at lines 42-45 is the input validation gate. It accepts a raw dict and returns a typed query object; the default raises `NotImplementedError`. Implementations call `Q(**params)` (running every Pydantic validator from 3.1, 3.2, 3.4) and may fill dynamic defaults. yfinance does both at lines 122-131, defaulting `start_date` to `now - relativedelta(years=1)` and `end_date` to `now`.
@@ -261,6 +378,34 @@ def vcr_config():
 
 The fourth gate is the subtle one. It asserts that `transform_data` actually did work; if `extract_data` already returned typed objects, line 177 catches the shortcut. This forces each TET stage to have a distinct shape.
 
+```mermaid
+flowchart TD
+    Start(["fetcher.test(params, credentials)"])
+    Run["Run TET: query, data, result = transform_query, extract_data, transform_data"]
+    G1{"Gate 1<br/>query isinstance of<br/>cls.query_params_type?"}
+    G2{"Gate 2<br/>every input param<br/>survived transform_query?"}
+    G3{"Gate 3<br/>raw data is truthy<br/>(DataFrame non-empty)?"}
+    G4{"Gate 4<br/>raw items are NOT yet<br/>cls.data_type instances?"}
+    G5{"Gate 5<br/>transformed_data<br/>has content?"}
+    G6{"Gate 6<br/>transformed items are<br/>cls.data_type AND cls.return_type?"}
+    Fail["AssertionError<br/>(test fails)"]
+    Pass(["return None<br/>(test passes)"])
+
+    Start --> Run --> G1
+    G1 -->|no| Fail
+    G1 -->|yes| G2
+    G2 -->|no| Fail
+    G2 -->|yes| G3
+    G3 -->|no| Fail
+    G3 -->|yes| G4
+    G4 -->|no| Fail
+    G4 -->|yes| G5
+    G5 -->|no| Fail
+    G5 -->|yes| G6
+    G6 -->|no| Fail
+    G6 -->|yes| Pass
+```
+
 ### 5.4 The recorded test pattern
 
 The minimal test for the worked example is at `openbb_platform/providers/yfinance/tests/test_yfinance_fetchers.py` lines 162-174:
@@ -293,6 +438,32 @@ Auto-scaffolding is provided by `openbb_platform/providers/tests/utils/unit_test
 ## 6. Replication Recipe
 
 Each phase has an explicit Gate. Do not proceed until the gate passes.
+
+```mermaid
+flowchart TD
+    P0["Phase 0<br/>Scaffold package<br/>+ entry point"]
+    P1["Phase 1<br/>Pick matching<br/>standard model"]
+    P2["Phase 2<br/>QueryParams subclass<br/>+ __alias_dict__ out"]
+    P3["Phase 3<br/>Data subclass<br/>+ __alias_dict__ in"]
+    P4["Phase 4<br/>Fetcher TET methods<br/>+ EmptyDataError"]
+    P5["Phase 5<br/>Recorded test<br/>+ vcr cassette"]
+    P6["Phase 6<br/>Integration tests<br/>+ coverage gate"]
+
+    G0{{"ProviderInterface.available_providers<br/>contains new name"}}
+    G1{{"Every required standard<br/>Data field has a source"}}
+    G2{{"Pydantic raises<br/>on out-of-range Literal"}}
+    G3{{"model_validate on sample row<br/>populates every standard field"}}
+    G4{{"asyncio.run(fetch_data) returns<br/>non-empty list[D]"}}
+    G5{{"pytest replays cassette<br/>offline, no secrets in YAML"}}
+    G6{{"test_provider_fetcher.py<br/>passes without warnings"}}
+
+    P0 --> G0 --> P1 --> G1 --> P2 --> G2 --> P3 --> G3 --> P4 --> G4 --> P5 --> G5 --> P6 --> G6 --> Done([Ship])
+
+    classDef phase fill:#cfe2ff,stroke:#084298,color:#000
+    classDef gate fill:#fff3cd,stroke:#664d03,color:#000
+    class P0,P1,P2,P3,P4,P5,P6 phase
+    class G0,G1,G2,G3,G4,G5,G6 gate
+```
 
 ### Phase 0 - Scaffold the provider package
 
